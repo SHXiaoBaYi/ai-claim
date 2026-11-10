@@ -1,0 +1,85 @@
+server:
+  port: 8080
+  servlet:
+    context-path: /api
+
+spring:
+  # local/dev/test/prod 都只连 ECS 47.99.95.38 上的 MySQL。
+  # 进程在这台机器上时用 127.0.0.1:3306；本机开发经隧道连同一台库。
+  profiles:
+    active: local
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: Asia/Shanghai
+    serialization:
+      write-dates-as-timestamps: false
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
+
+# 唯一 ECS：47.99.95.38。测试与生产共用这台机器上的 MySQL（库名 base_admin）。
+xby:
+  rds:
+    external-host: 127.0.0.1
+    internal-host: 127.0.0.1
+    port: 3306
+    database: base_admin
+    username: ${RDS_USERNAME:xiaobayi0099}
+    password: ${RDS_PASSWORD:Xby@123456}
+  upload-dir: ${UPLOAD_DIR:./uploads}
+  # Java 代码不得再写死 IP 作 @Value 默认值
+  upload-public-base: ${UPLOAD_PUBLIC_BASE:http://47.99.95.38/shxby/api}
+  # 账号密码登录：默认仅 localhost；测试环境在 application-test.yml 打开
+  auth:
+    password-login-enabled: ${XBY_PASSWORD_LOGIN_ENABLED:false}
+  # 通用 AI（OpenAI 兼容）。未启用或未配 key 时，相似问题走本地启发式
+  # provider: deepseek | tongyi | zhipu | moonshot
+  # 你有阿里云账号时优先试 tongyi（DashScope 兼容模式）
+  ai:
+    enabled: ${XBY_AI_ENABLED:false}
+    provider: ${XBY_AI_PROVIDER:tongyi}
+    # 通用 key；也可按厂商单独配下面几个
+    api-key: ${XBY_AI_API_KEY:}
+    deepseek-api-key: ${DEEPSEEK_API_KEY:}
+    tongyi-api-key: ${TONGYI_API_KEY:}
+    zhipu-api-key: ${ZHIPU_API_KEY:}
+    moonshot-api-key: ${MOONSHOT_API_KEY:}
+    # 一般不用改；改了会覆盖厂商预设
+    base-url: ${XBY_AI_BASE_URL:}
+    model: ${XBY_AI_MODEL:}
+    timeout-seconds: ${XBY_AI_TIMEOUT_SECONDS:60}
+
+mybatis-plus:
+  mapper-locations: classpath:mapper/*.xml
+  type-aliases-package: com.base.admin.domain.entity
+  global-config:
+    db-config:
+      id-type: auto
+      logic-delete-field: isActive
+      logic-not-delete-value: 1
+      logic-delete-value: 0
+  configuration:
+    map-underscore-to-camel-case: true
+    # 演示数据刷库时 StdOutImpl 会堵住控制台管道；改用 slf4j，量级由 logging 级别控制
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    tags-sorter: alpha
+    operations-sorter: alpha
+
+jwt:
+  secret: YmFzZS1hZG1pbi1zZWNyZXQta2V5LW11c3QtYmUtYXQtbGVhc3QtMjU2LWJpdHMtbG9uZw==
+  # 登录有效期 12 小时（毫秒）
+  expiration: 43200000
+
+dingtalk:
+  # 页面「系统管理 → 钉钉应用配置」优先。这里仅在库里没有启用配置时作备用。
+  enabled: ${DINGTALK_ENABLED:false}
+  client-id: ${DINGTALK_CLIENT_ID:}
+  client-secret: ${DINGTALK_CLIENT_SECRET:}
+  corp-id: ${DINGTALK_CORP_ID:}

@@ -1,0 +1,439 @@
+package com.base.admin.service.impl;
+
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.base.admin.common.Constants;
+import com.base.admin.domain.dto.DingTalkLoginDTO;
+import com.base.admin.domain.dto.DingTalkSsoDTO;
+import com.base.admin.domain.dto.LoginDTO;
+import com.base.admin.domain.entity.SysRole;
+import com.base.admin.domain.entity.SysUser;
+import com.base.admin.domain.entity.SysUserRole;
+import com.base.admin.domain.vo.DingTalkLoginConfigVO;
+import com.base.admin.domain.vo.LoginOptionsVO;
+import com.base.admin.domain.vo.LoginVO;
+import com.base.admin.domain.vo.MenuVO;
+import com.base.admin.domain.vo.UserInfoVO;
+import com.base.admin.exception.BusinessException;
+import com.base.admin.mapper.SysMenuMapper;
+import com.base.admin.mapper.SysRoleMapper;
+import com.base.admin.mapper.SysUserMapper;
+import com.base.admin.mapper.SysUserRoleMapper;
+import com.base.admin.security.JwtUtils;
+import com.base.admin.security.LoginUser;
+import com.base.admin.service.DingTalkAppService;
+import com.base.admin.service.DingTalkAuthService;
+import com.base.admin.service.DingTalkForceLoginTicketStore;
+import com.base.admin.service.OnlineSessionService;
+import com.base.admin.service.SysLoginService;
+import com.base.admin.util.LocalhostAccess;
+import com.base.admin.util.TreeUtil;
+import jakarta.servlet.http.HttpServletRequest;
+import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
+
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import java.util.stream.Collectors;
+
+@Service
+@RequiredArgsConstructor
+public class SysLoginServiceImpl implements SysLoginService {
+
+    private final JwtUtils jwtUtils;
+    private final SysUserMapper userMapper;
+    private final SysRoleMapper roleMapper;
+    private final SysUserRoleMapper userRoleMapper;
+    private final SysMenuMapper menuMapper;
+    private final OnlineSessionService onlineSessionService;
+    private final DingTalkAppService dingTalkAppService;
+    private final DingTalkAuthService dingTalkAuthService;
+    private final JdbcTemplate jdbc;
+    private final PasswordEncoder passwordEncoder;
+    private final AuthenticationManager authenticationManager;
+    private final DingTalkForceLoginTicketStore forceLoginTicketStore;
+
+    /** 测试环境等非 localhost 场景打开账号密码登录；生产保持 false。 */
+    @Value("${xby.auth.password-login-enabled:false}")
+    private boolean passwordLoginEnabled;
+
+    private boolean allowPasswordLogin(HttpServletRequest request) {
+        return passwordLoginEnabled || LocalhostAccess.isLocalhostRequest(request);
+    }
+
+    @Override
+    public LoginVO login(LoginDTO dto, String ip, String userAgent, HttpServletRequest request) {
+        if (!allowPasswordLogin(request)) {
+            throw new BusinessException("当前环境未开放账号密码登录，请使用钉钉扫码登录");
+        }
+        SysUser user = userMapper.selectOne(
+                new LambdaQueryWrapper<SysUser>().eq(SysUser::getUsername, dto.getUsername()));
+        if (user == null) {
+            throw new BusinessException("用户名或密码错误");
+        }
+        if (Integer.valueOf(Constants.STATUS_DISABLED).equals(user.getStatus())) {
+            throw new BusinessException("该账户已被禁用，请联系管理员");
+        }
+        Authentication authentication = authenticationManager.authenticate(
+                new UsernamePasswordAuthenticationToken(dto.getUsername(), dto.getPassword()));
+        LoginUser loginUser = (LoginUser) authentication.getPrincipal();
+        boolean force = Boolean.TRUE.equals(dto.getForce());
+        if (!force && onlineSessionService.hasActiveSession(loginUser.getUserId())) {
+            throw new BusinessException(Constants.CODE_LOGIN_CONFLICT, "该账号已在其他设备登录，是否强制对方下线？");
+        }
+        return issueLoginToken(loginUser.getUserId(), loginUser.getUsername(), ip, userAgent, true);
+    }
+
+    @Override
+    public LoginOptionsVO loginOptions(HttpServletRequest request) {
+        LoginOptionsVO vo = new LoginOptionsVO();
+        boolean passwordOk = allowPasswordLogin(request);
+        vo.setPasswordLoginEnabled(passwordOk);
+        DingTalkLoginConfigVO ding = dingTalkAppService.loginConfig();
+        vo.setDingTalkEnabled(ding.getEnabled() != null && ding.getEnabled() == 1);
+        vo.setClientId(ding.getClientId());
+        vo.setCorpId(ding.getCorpId());
+        vo.setExclusiveLogin(ding.getExclusiveLogin());
+        if (Boolean.TRUE.equals(vo.getDingTalkEnabled()) && passwordOk) {
+            vo.setMessage("可使用钉钉扫码或账号密码登录");
+        } else if (Boolean.TRUE.equals(vo.getDingTalkEnabled())) {
+            vo.setMessage("请使用钉钉扫码登录");
+        } else if (passwordOk) {
+            vo.setMessage("请使用账号密码登录");
+        } else {
+            vo.setMessage("钉钉扫码登录未配置，请联系管理员");
+        }
+        return vo;
+    }
+
+    @Override
+    public DingTalkLoginConfigVO dingTalkLoginConfig() {
+        return dingTalkAppService.loginConfig();
+    }
+
+    @Override
+    @Transactional
+    public LoginVO loginByDingTalk(DingTalkLoginDTO dto, String ip, String userAgent) {
+        boolean force = Boolean.TRUE.equals(dto.getForce());
+        Long userId;
+        String username;
+
+        if (force && StringUtils.hasText(dto.getForceTicket())) {
+            DingTalkForceLoginTicketStore.Entry pending = forceLoginTicketStore.consume(dto.getForceTicket());
+            if (pending == null) {
+                throw new BusinessException("强制登录已失效，请重新扫码");
+            }
+            userId = pending.userId();
+            username = pending.username();
+        } else {
+            if (!StringUtils.hasText(dto.getAuthCode())) {
+                throw new BusinessException("缺少钉钉授权码");
+            }
+            DingTalkAuthService.UserProfile profile = dingTalkAuthService.resolveByAuthCode(dto.getAuthCode());
+            BoundUser bound = resolveSystemUser(profile);
+            userId = bound.userId();
+            username = bound.username();
+            if (!force && onlineSessionService.hasActiveSession(userId)) {
+                String ticket = forceLoginTicketStore.issue(userId, username);
+                throw new BusinessException(
+                        Constants.CODE_LOGIN_CONFLICT,
+                        "该账号已在其他设备登录，是否强制对方下线？",
+                        Map.of("forceTicket", ticket));
+            }
+        }
+
+        return issueLoginToken(userId, username, ip, userAgent, true);
+    }
+
+    @Override
+    @Transactional
+    public LoginVO loginByDingTalkSso(DingTalkSsoDTO dto, String ip, String userAgent) {
+        // 免登不参与设备互踢：不检查冲突、不写入/覆盖 online 会话，也不被扫码/密码登录顶掉
+        String mode = dto.getMode() == null ? "corp" : dto.getMode().trim().toLowerCase();
+        Long userId;
+        String username;
+
+        if ("oauth".equals(mode)) {
+            if (!StringUtils.hasText(dto.getAuthCode())) {
+                throw new BusinessException("缺少钉钉授权码");
+            }
+            DingTalkAuthService.UserProfile profile = dingTalkAuthService.resolveByAuthCode(dto.getAuthCode());
+            BoundUser bound = resolveSystemUser(profile);
+            userId = bound.userId();
+            username = bound.username();
+        } else {
+            if (!StringUtils.hasText(dto.getAuthCode())) {
+                throw new BusinessException("缺少钉钉免登授权码");
+            }
+            DingTalkAuthService.CorpIdentity identity = dingTalkAuthService.resolveByCorpAuthCode(dto.getAuthCode());
+            BoundUser bound = resolveBoundByCorp(identity);
+            userId = bound.userId();
+            username = bound.username();
+        }
+
+        return issueLoginToken(userId, username, ip, userAgent, false);
+    }
+
+    /**
+     * @param deviceExclusive true=写入 online 并参与互踢；false=免登，仅发 JWT
+     */
+    private LoginVO issueLoginToken(Long userId, String username, String ip, String userAgent,
+                                    boolean deviceExclusive) {
+        SysUser user = userMapper.selectById(userId);
+        if (user == null || (user.getIsActive() != null && user.getIsActive() == 0)) {
+            throw new BusinessException("系统账号不存在或已删除");
+        }
+        if (Integer.valueOf(Constants.STATUS_DISABLED).equals(user.getStatus())) {
+            throw new BusinessException("该账户已被禁用，请联系管理员");
+        }
+        username = user.getUsername();
+
+        String tokenId = UUID.randomUUID().toString().replace("-", "");
+        String token = jwtUtils.generateToken(userId, username, tokenId, deviceExclusive);
+        if (deviceExclusive) {
+            onlineSessionService.saveSession(userId, username, tokenId, ip, userAgent);
+        }
+        return LoginVO.builder().token(token).build();
+    }
+
+    private BoundUser resolveBoundByCorp(DingTalkAuthService.CorpIdentity identity) {
+        BoundUser byUserId = findByDingUserId(identity.userid());
+        if (byUserId != null) {
+            upsertBind(byUserId.userId(), identity.userid(), identity.unionId());
+            return byUserId;
+        }
+        if (StringUtils.hasText(identity.unionId()) && !identity.unionId().startsWith("corp_")) {
+            BoundUser byUnion = findByUnionId(identity.unionId());
+            if (byUnion != null) {
+                upsertBind(byUnion.userId(), identity.userid(), identity.unionId());
+                return byUnion;
+            }
+        }
+        if (StringUtils.hasText(identity.mobile())) {
+            BoundUser byPhone = findByPhone(identity.mobile());
+            if (byPhone != null) {
+                upsertBind(byPhone.userId(), identity.userid(), identity.unionId());
+                return byPhone;
+            }
+        }
+        return createUserFromDingTalk(identity.toProfile(), identity.userid());
+    }
+
+    /**
+     * 扫码登录：只用手机号判断系统用户是否存在。不存在则拒绝，存在则绑定企业用户 ID、unionId、邮箱。
+     */
+    private BoundUser resolveSystemUser(DingTalkAuthService.UserProfile profile) {
+        if (!StringUtils.hasText(profile.mobile())) {
+            throw new BusinessException("钉钉未返回手机号，无法核验是否为本系统用户");
+        }
+        List<BoundUser> matches = findUsersByPhone(profile.mobile());
+        if (matches.isEmpty()) {
+            throw new BusinessException("你无权限登录该系统");
+        }
+        if (matches.size() > 1) {
+            throw new BusinessException("该手机号对应多个系统账号，请联系管理员");
+        }
+        if (!StringUtils.hasText(profile.corpUserId())) {
+            throw new BusinessException("未能获取钉钉企业用户ID，请确认该账号属于本企业且应用已开通通讯录权限");
+        }
+        if (!StringUtils.hasText(profile.unionId())) {
+            throw new BusinessException("钉钉未返回 unionId，无法完成绑定");
+        }
+        BoundUser user = matches.get(0);
+        String corpUserId = profile.corpUserId().trim();
+        if (corpUserId.length() > 64) {
+            throw new BusinessException("钉钉企业用户ID过长，无法绑定");
+        }
+        upsertBind(user.userId(), corpUserId, profile.unionId().trim());
+        bindEmail(user.userId(), profile.email());
+        return user;
+    }
+
+    private BoundUser createUserFromDingTalk(DingTalkAuthService.UserProfile profile, String dingUserId) {
+        Long roleId = jdbc.query("SELECT role_id FROM sys_role WHERE role_key = ? AND is_active = 1 AND status = 0 LIMIT 1",
+                rs -> rs.next() ? rs.getLong(1) : null, Constants.HR_USER_ROLE_KEY);
+        if (roleId == null) {
+            throw new BusinessException("系统缺少「普通账号」角色（hr_user），请联系管理员初始化角色后再登录");
+        }
+        String username = uniqueUsername(profile, dingUserId);
+        String nickname = StringUtils.hasText(profile.nick()) ? profile.nick().trim() : username;
+        String phone = StringUtils.hasText(profile.mobile()) ? profile.mobile().trim() : null;
+        // 密码登录已关闭，写入随机不可用哈希即可
+        String passwordHash = passwordEncoder.encode(UUID.randomUUID().toString());
+
+        SysUser user = new SysUser();
+        user.setUsername(username);
+        user.setPassword(passwordHash);
+        user.setNickname(nickname);
+        user.setPhone(phone);
+        user.setAvatar(StringUtils.hasText(profile.avatar()) ? profile.avatar().trim() : null);
+        user.setGender(0);
+        user.setStatus(Constants.STATUS_ACTIVE);
+        user.setRemark("钉钉免登/扫码自动注册");
+        userMapper.insert(user);
+
+        userRoleMapper.insertUserRole(user.getUserId(), roleId);
+
+        upsertBind(user.getUserId(), dingUserId, profile.unionId());
+        return new BoundUser(user.getUserId(), user.getUsername());
+    }
+
+    private String uniqueUsername(DingTalkAuthService.UserProfile profile, String dingUserId) {
+        String base;
+        if (StringUtils.hasText(profile.mobile())) {
+            base = profile.mobile().trim();
+        } else {
+            String raw = dingUserId.replaceAll("[^a-zA-Z0-9_]", "");
+            if (!StringUtils.hasText(raw)) {
+                raw = profile.unionId().replaceAll("[^a-zA-Z0-9_]", "");
+            }
+            if (raw.length() > 28) {
+                raw = raw.substring(raw.length() - 28);
+            }
+            base = "dt_" + raw;
+        }
+        if (base.length() > 40) {
+            base = base.substring(0, 40);
+        }
+        String candidate = base;
+        int i = 0;
+        while (true) {
+            Long exists = userMapper.selectCount(
+                    new LambdaQueryWrapper<SysUser>().eq(SysUser::getUsername, candidate));
+            if (exists == null || exists == 0) {
+                return candidate;
+            }
+            i++;
+            String suffix = "_" + i;
+            int max = Math.max(1, 40 - suffix.length());
+            candidate = base.substring(0, Math.min(base.length(), max)) + suffix;
+            if (i > 50) {
+                return "dt_" + UUID.randomUUID().toString().replace("-", "").substring(0, 16);
+            }
+        }
+    }
+
+    private BoundUser findByUnionId(String unionId) {
+        return jdbc.query("""
+                SELECT u.user_id, u.username
+                FROM hr_user_dingtalk d
+                INNER JOIN sys_user u ON u.user_id = d.user_id AND u.is_active = 1
+                WHERE d.dingtalk_union_id = ? AND d.is_active = 1
+                LIMIT 1
+                """, rs -> rs.next() ? new BoundUser(rs.getLong("user_id"), rs.getString("username")) : null, unionId);
+    }
+
+    private BoundUser findByDingUserId(String dingUserId) {
+        return jdbc.query("""
+                SELECT u.user_id, u.username
+                FROM hr_user_dingtalk d
+                INNER JOIN sys_user u ON u.user_id = d.user_id AND u.is_active = 1
+                WHERE d.dingtalk_user_id = ? AND d.is_active = 1
+                LIMIT 1
+                """, rs -> rs.next() ? new BoundUser(rs.getLong("user_id"), rs.getString("username")) : null, dingUserId);
+    }
+
+    private BoundUser findByPhone(String phone) {
+        List<BoundUser> matches = findUsersByPhone(phone);
+        return matches.isEmpty() ? null : matches.get(0);
+    }
+
+    private List<BoundUser> findUsersByPhone(String phone) {
+        String target = DingTalkAuthService.normalizeMobile(phone);
+        if (!StringUtils.hasText(target)) {
+            return List.of();
+        }
+        List<BoundUser> matched = new ArrayList<>();
+        jdbc.query("""
+                SELECT user_id, username, phone FROM sys_user
+                WHERE is_active = 1 AND phone IS NOT NULL AND phone <> ''
+                """, rs -> {
+            if (target.equals(DingTalkAuthService.normalizeMobile(rs.getString("phone")))) {
+                matched.add(new BoundUser(rs.getLong("user_id"), rs.getString("username")));
+            }
+        });
+        return matched;
+    }
+
+    private void bindEmail(Long userId, String email) {
+        if (!StringUtils.hasText(email)) {
+            return;
+        }
+        String value = email.trim();
+        if (value.length() > 100) {
+            value = value.substring(0, 100);
+        }
+        SysUser patch = new SysUser();
+        patch.setUserId(userId);
+        patch.setEmail(value);
+        patch.setUpdateBy("dingtalk-login");
+        userMapper.updateById(patch);
+    }
+
+    private void upsertBind(Long userId, String dingUserId, String unionId) {
+        jdbc.update("""
+                INSERT INTO hr_user_dingtalk (user_id, dingtalk_user_id, dingtalk_union_id, create_by, is_active)
+                VALUES (?, ?, ?, 'dingtalk-login', 1)
+                ON DUPLICATE KEY UPDATE dingtalk_user_id = VALUES(dingtalk_user_id),
+                  dingtalk_union_id = VALUES(dingtalk_union_id), is_active = 1,
+                  update_by = 'dingtalk-login'
+                """, userId, dingUserId, unionId);
+    }
+
+    @Override
+    public void logout(Long userId) {
+        onlineSessionService.removeSession(userId);
+    }
+
+    @Override
+    public UserInfoVO getUserInfo(Long userId) {
+        SysUser user = userMapper.selectById(userId);
+        if (user == null) {
+            throw new BusinessException("用户不存在");
+        }
+
+        List<SysUserRole> userRoles = userRoleMapper.selectList(
+                new LambdaQueryWrapper<SysUserRole>().eq(SysUserRole::getUserId, userId));
+        List<Long> roleIds = userRoles.stream().map(SysUserRole::getRoleId).collect(Collectors.toList());
+
+        List<SysRole> roles = roleIds.isEmpty() ? List.of() : roleMapper.selectBatchIds(roleIds);
+        List<String> roleKeys = roles.stream().map(SysRole::getRoleKey).collect(Collectors.toList());
+
+        boolean isAdmin = roleKeys.contains(Constants.ADMIN_ROLE_KEY);
+
+        Set<String> permissions;
+        List<MenuVO> menus;
+        if (isAdmin) {
+            permissions = new HashSet<>();
+            permissions.add(Constants.ADMIN_PERM);
+            menus = TreeUtil.buildMenuTree(menuMapper.selectAllMenus());
+        } else {
+            permissions = menuMapper.selectPermsByUserId(userId);
+            menus = TreeUtil.buildMenuTree(menuMapper.selectMenusByUserId(userId));
+        }
+
+        return UserInfoVO.builder()
+                .userId(user.getUserId())
+                .username(user.getUsername())
+                .nickname(user.getNickname())
+                .avatar(user.getAvatar())
+                .roles(roleKeys)
+                .permissions(permissions)
+                .menus(menus)
+                .build();
+    }
+
+    private record BoundUser(Long userId, String username) {
+    }
+}
