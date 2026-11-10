@@ -1,5 +1,6 @@
-# 编译输出的 class 文件（仅 Java Maven，勿用 **/target/，会误伤 FrontEnd/src/pages/hr/target）
-BackEnd/target/
+# Maven 构建产物。本文件位于 BackEnd/，/target/ 只忽略本模块根目录，
+# 不会波及其他名为 target 的业务目录。
+/target/
 **/classes/
 **/*.class
 
