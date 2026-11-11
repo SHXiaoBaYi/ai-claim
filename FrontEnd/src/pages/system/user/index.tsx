@@ -272,7 +272,7 @@ const UserManage = memo(function UserManage() {
         ]}
         tableExtraRender={() => (
           <div className='mb-3 text-sm text-neutral-500'>
-            支持手动新增、编辑、删除。手机号必填且不能重复，钉钉扫码登录按手机号匹配已登记用户。
+            支持手动新增、编辑、删除。手机号必填且不能重复。钉钉扫码后按手机号核验用户列表，不在列表中会提示无权使用。
           </div>
         )}
       />

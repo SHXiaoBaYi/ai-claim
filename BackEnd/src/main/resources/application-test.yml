@@ -8,9 +8,9 @@ spring:
 
 xby:
   upload-public-base: ${UPLOAD_PUBLIC_BASE:http://47.103.191.164/shxby/api}
-  # 测试 ECS 允许账号密码登录（生产仍仅钉钉）
+  # 只允许钉钉扫码登录
   auth:
-    password-login-enabled: true
+    password-login-enabled: false
 
 # 测试环境保留 Swagger，便于联调
 springdoc:

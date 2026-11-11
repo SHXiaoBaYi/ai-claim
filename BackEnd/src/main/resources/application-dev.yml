@@ -15,4 +15,4 @@ xby:
     external-host: 127.0.0.1
     internal-host: 127.0.0.1
   auth:
-    password-login-enabled: true
+    password-login-enabled: false

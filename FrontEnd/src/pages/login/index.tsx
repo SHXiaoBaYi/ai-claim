@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Button, Card, Divider, Form, Input, Modal, Spin } from 'antd';
-import { ExclamationCircleOutlined, LockOutlined, ReloadOutlined, UserOutlined } from '@ant-design/icons';
+import { Button, Card, Modal, Spin } from 'antd';
+import { ExclamationCircleOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useDispatch } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import { getLoginOptionsApi, type LoginOptions } from '@/api/auth';
 import { CODE_LOGIN_CONFLICT } from '@/api/request';
-import { getInfo, login, loginByDingTalk } from '@/store/slices/userSlice';
+import { getInfo, loginByDingTalk } from '@/store/slices/userSlice';
 import { message } from '@/store/slices/staticFunctionSlice';
 import type { AppDispatch } from '@/store';
 /** Pexels 免费商用：客服戴耳机处理来电与单据。https://www.pexels.com/photo/8192012/ */
@@ -23,12 +23,6 @@ declare global {
       error: (errorMsg: string) => void,
     ) => void;
   }
-}
-
-/** 只有浏览器地址是 localhost / 127.0.0.1 时开放账号密码，线上只留钉钉扫码。 */
-function isLocalDevHost() {
-  const host = window.location.hostname;
-  return host === 'localhost' || host === '127.0.0.1' || host === '::1';
 }
 
 function loginRedirectUri() {
@@ -66,8 +60,6 @@ export default function Login() {
   const [qrError, setQrError] = useState('');
   const [qrKey, setQrKey] = useState(0);
   const loggingRef = useRef(false);
-  const [form] = Form.useForm();
-  const localPassword = isLocalDevHost();
   const dispatch = useDispatch<AppDispatch>();
   const navigate = useNavigate();
 
@@ -123,28 +115,6 @@ export default function Login() {
         loggingRef.current = false;
         setQrError(payload?.message || '登录失败');
         setQrKey((k) => k + 1);
-      } finally {
-        setLoading(false);
-      }
-    },
-    [afterToken, dispatch, handleConflict],
-  );
-
-  const completePasswordLogin = useCallback(
-    async (username: string, password: string, force = false) => {
-      if (loggingRef.current) return;
-      loggingRef.current = true;
-      setLoading(true);
-      try {
-        await dispatch(login({ username, password, force })).unwrap();
-        await afterToken();
-      } catch (err) {
-        const code = Number((err as { code?: number | string })?.code);
-        if (code === CODE_LOGIN_CONFLICT) {
-          handleConflict(() => completePasswordLogin(username, password, true));
-          return;
-        }
-        loggingRef.current = false;
       } finally {
         setLoading(false);
       }
@@ -268,9 +238,7 @@ export default function Login() {
               <span className='text-2xl font-bold text-white'>小</span>
             </div>
             <h2 className='text-xl font-bold tracking-tight text-gray-800'>欢迎登录</h2>
-            <p className='mt-1.5 text-sm text-gray-400'>
-              {localPassword ? '本机可使用账号密码或钉钉扫码登录' : '请使用钉钉扫码登录'}
-            </p>
+            <p className='mt-1.5 text-sm text-gray-400'>请使用钉钉扫码登录</p>
           </div>
 
           <Spin spinning={configLoading || loading}>
@@ -292,58 +260,11 @@ export default function Login() {
                 >
                   刷新二维码
                 </Button>
-                <p className='text-center text-xs text-gray-400'>仅支持已在系统中登记手机号的企业钉钉扫码</p>
+                <p className='text-center text-xs text-gray-400'>扫码后核验是否在本系统用户列表中</p>
               </div>
-            ) : !configLoading && !localPassword ? (
+            ) : !configLoading ? (
               <div className='rounded-lg bg-amber-50 px-4 py-6 text-center text-sm text-amber-800'>
                 钉钉扫码登录未配置，请联系管理员
-              </div>
-            ) : null}
-
-            {localPassword ? (
-              <div className={dingEnabled ? 'mt-2' : undefined}>
-                {dingEnabled ? (
-                  <Divider plain>
-                    <span className='text-xs text-gray-400'>本机账号密码</span>
-                  </Divider>
-                ) : null}
-                <Form
-                  form={form}
-                  size='large'
-                  onFinish={(values) => void completePasswordLogin(values.username, values.password)}
-                >
-                  <Form.Item
-                    name='username'
-                    rules={[{ required: true, message: '请输入用户名' }]}
-                  >
-                    <Input
-                      prefix={<UserOutlined className='text-gray-400' />}
-                      placeholder='用户名'
-                      className='rounded-lg!'
-                    />
-                  </Form.Item>
-                  <Form.Item
-                    name='password'
-                    rules={[{ required: true, message: '请输入密码' }]}
-                  >
-                    <Input.Password
-                      prefix={<LockOutlined className='text-gray-400' />}
-                      placeholder='密码'
-                      className='rounded-lg!'
-                    />
-                  </Form.Item>
-                  <Form.Item className='mb-0!'>
-                    <Button
-                      type='primary'
-                      htmlType='submit'
-                      loading={loading}
-                      block
-                      className='h-11! rounded-lg! text-base! font-medium!'
-                    >
-                      登 录
-                    </Button>
-                  </Form.Item>
-                </Form>
               </div>
             ) : null}
           </Spin>

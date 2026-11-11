@@ -23,4 +23,4 @@ xby:
   upload-dir: ${UPLOAD_DIR:./uploads}
   upload-public-base: ${UPLOAD_PUBLIC_BASE:http://47.103.191.164/shxby/api}
   auth:
-    password-login-enabled: true
+    password-login-enabled: false

@@ -64,7 +64,7 @@ public class ClaimConversationService {
         if (claim == null) {
             return null;
         }
-        String reply = finish(claim, dialogue(claim.getId()));
+        String reply = finish(claim);
         saveMessage(claim.getId(), "bot", "text", reply);
         return caseMapper.selectById(caseId);
     }
@@ -98,7 +98,7 @@ public class ClaimConversationService {
         fillCategory(claim);
         String reply;
         if (ready(claim)) {
-            reply = finish(claim, dialogue(claim.getId()));
+            reply = finish(claim);
         } else {
             String packed = nextQuestion(claim);
             claim.setPendingSlot(packed == null ? "" : pendingOf(packed));
@@ -301,8 +301,8 @@ public class ClaimConversationService {
         return code + "|" + question;
     }
 
-    private String finish(ClaimCase claim, String dialogue) {
-        String blob = ClaimTexts.empty(claim.getSymptom()) + "\n" + dialogue;
+    private String finish(ClaimCase claim) {
+        String blob = complaintBlob(claim);
         ClaimSopNode symptom = sopService.matchSymptom(blob);
         ClaimSopNode action = sopService.pickAction(symptom, claim);
         if (symptom != null) {
@@ -329,9 +329,10 @@ public class ClaimConversationService {
             return fallback;
         }
         String system = """
-                你是小巴依理赔助手。只能根据给定的流程原文和历史案例写建议。
+                你是小巴依理赔助手。建议必须执行依据里的「SOP 处理」，不能改成别的现象或别的处理。
+                参考案例只说明同一类现象以前怎么结案，不能用别的现象覆盖流程。
                 不要发明流程里没有的赔偿倍数。缺斤查实才写退一赔三，异物索赔才写十倍且不足按 1000 元。
-                用中文，先写建议动作和货品或金额，再写一句原因。不要输出 JSON。
+                用中文，先写建议动作和货品或金额，再写一句原因，并点明依据的流程名称。不要输出 JSON。
                 """;
         try {
             String answer = aiChatService.chat(system, "档案：\n" + snapshot(claim) + "\n\n" + basis, null, 0.2);
@@ -351,10 +352,10 @@ public class ClaimConversationService {
             text.append("SOP 处理：").append(action.getTitle()).append("。").append(ClaimTexts.empty(action.getContent())).append("\n");
         }
         if (similar.isEmpty()) {
-            text.append("历史案例：没有找到相近的已结案记录。");
+            text.append("参考案例：没有找到同一现象的已结案记录。");
             return text.toString();
         }
-        text.append("参考案例：\n");
+        text.append("参考案例（与上面同一现象）：\n");
         int index = 1;
         for (ClaimHistoryCase item : similar) {
             text.append(index++).append(". ")
@@ -390,26 +391,37 @@ public class ClaimConversationService {
     }
 
     private int score(ClaimCase claim, String keywords, ClaimHistoryCase row) {
-        int score = 0;
+        String brief = ClaimTexts.empty(row.getSymptomBrief());
+        int symptomScore = 0;
+        for (String keyword : keywords.split(",")) {
+            String word = keyword.trim();
+            if (word.length() >= 1 && brief.contains(word)) {
+                symptomScore += word.length();
+            }
+        }
+        if (symptomScore == 0) {
+            return 0;
+        }
+        int score = symptomScore * 10;
         String category = ClaimTexts.empty(claim.getProductCategory());
         String product = ClaimTexts.empty(claim.getProductName());
-        String symptom = ClaimTexts.empty(claim.getSymptom());
         if (!category.isBlank() && ClaimTexts.empty(row.getProductCategory()).contains(category)) {
             score += 4;
         }
         if (!product.isBlank() && (ClaimTexts.empty(row.getProductName()).contains(product) || product.contains(ClaimTexts.empty(row.getProductName())))) {
             score += 3;
         }
-        for (String keyword : keywords.split(",")) {
-            String word = keyword.trim();
-            if (word.length() >= 1 && (ClaimTexts.empty(row.getSymptomBrief()).contains(word) || ClaimTexts.empty(row.getClaimOpinion()).contains(word))) {
-                score += 2;
-            }
-        }
-        if (score == 0 && !symptom.isBlank() && ClaimTexts.empty(row.getSymptomBrief()).contains(symptom.substring(0, Math.min(2, symptom.length())))) {
-            score += 1;
-        }
         return score;
+    }
+
+    /** 只用已经落库的投诉事实匹配流程，不把机器人提问里的举例算进去。 */
+    private String complaintBlob(ClaimCase claim) {
+        return String.join("\n",
+                ClaimTexts.empty(claim.getSymptom()),
+                ClaimTexts.empty(claim.getProductName()),
+                ClaimTexts.empty(claim.getCookingMethod()),
+                ClaimTexts.empty(claim.getLogisticsSummary()),
+                ClaimTexts.empty(claim.getConsumeSummary()));
     }
 
     private boolean filled(ClaimCase claim, String slot) {
