@@ -22,6 +22,8 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Slf4j
 @Service
@@ -92,9 +94,7 @@ public class ClaimConversationService {
         if (!ClaimTexts.blank(inbound.senderName())) {
             claim.setSenderName(inbound.senderName());
         }
-        applyPending(claim, userText, !saved.isEmpty());
-        applyHeuristic(claim, userText);
-        applyAi(claim, dialogue(claim.getId()));
+        applyFacts(claim, userText, !saved.isEmpty());
         fillCategory(claim);
         String reply;
         if (ready(claim)) {
@@ -176,18 +176,44 @@ public class ClaimConversationService {
         return names;
     }
 
-    private void applyPending(ClaimCase claim, String text, boolean hasFile) {
+    private void applyFacts(ClaimCase claim, String text, boolean hasFile) {
         String slot = ClaimTexts.empty(claim.getPendingSlot());
-        if (slot.isBlank() || (text.isBlank() && !hasFile)) {
-            return;
-        }
-        if (ClaimTexts.isSkipPhrase(text)) {
+        if (ClaimTexts.isSkipPhrase(text) && !slot.isBlank()) {
             claim.setSkippedSlots(ClaimTexts.addSkip(claim.getSkippedSlots(), slot));
             return;
+        }
+        if (!text.isBlank()) {
+            extractLocal(claim, text);
+            applyAi(claim, text);
         }
         if ("evidence".equals(slot) && hasFile) {
             return;
         }
+        if (!slot.isBlank() && !text.isBlank() && !filled(claim, slot)) {
+            writeSlot(claim, slot, text);
+        }
+    }
+
+    /** 一句话里可能同时有姓名、电话、门店、产品和现象，先拆开再决定下一问。 */
+    private void extractLocal(ClaimCase claim, String text) {
+        setPhone(claim, ClaimTexts.phoneOf(text));
+        setIfBlank(claim::getCustomerAddress, claim::setCustomerAddress, ClaimTexts.addressOf(text));
+        setIfBlank(claim::getCustomerName, claim::setCustomerName, nameOf(text));
+        setIfBlank(claim::getStoreName, claim::setStoreName, storeOf(text));
+        setIfBlank(claim::getProductName, claim::setProductName, productOf(text));
+        setIfBlank(claim::getSymptom, claim::setSymptom, symptomOf(text));
+        setIfBlank(claim::getCustomerType, claim::setCustomerType, customerType(text));
+        setIfBlank(claim::getCustomerDemand, claim::setCustomerDemand, demandOf(text));
+        setIfBlank(claim::getCookingMethod, claim::setCookingMethod, cookingOf(text));
+        setIfBlank(claim::getConsumeSummary, claim::setConsumeSummary, consumeOf(text));
+        setIfBlank(claim::getLogisticsSummary, claim::setLogisticsSummary, logisticsOf(text));
+        String logistics = text.replaceAll(".*?(SF\\d{8,}).*", "$1");
+        if (ClaimTexts.blank(claim.getLogisticsNo()) && logistics.startsWith("SF")) {
+            claim.setLogisticsNo(logistics);
+        }
+    }
+
+    private void writeSlot(ClaimCase claim, String slot, String text) {
         switch (slot) {
             case "customerPhone" -> setPhone(claim, ClaimTexts.phoneOf(text).isBlank() ? text : ClaimTexts.phoneOf(text));
             case "customerName" -> setIfBlank(claim::getCustomerName, claim::setCustomerName, text);
@@ -195,7 +221,7 @@ public class ClaimConversationService {
             case "productName" -> setIfBlank(claim::getProductName, claim::setProductName, text);
             case "symptom" -> setIfBlank(claim::getSymptom, claim::setSymptom, text);
             case "customerDemand" -> setIfBlank(claim::getCustomerDemand, claim::setCustomerDemand, text);
-            case "customerType" -> setIfBlank(claim::getCustomerType, claim::setCustomerType, customerType(text));
+            case "customerType" -> setIfBlank(claim::getCustomerType, claim::setCustomerType, customerType(text).isBlank() ? text : customerType(text));
             case "consumeSummary" -> setIfBlank(claim::getConsumeSummary, claim::setConsumeSummary, text);
             case "cookingMethod" -> setIfBlank(claim::getCookingMethod, claim::setCookingMethod, text);
             case "logisticsSummary" -> setIfBlank(claim::getLogisticsSummary, claim::setLogisticsSummary, text);
@@ -204,41 +230,19 @@ public class ClaimConversationService {
         }
     }
 
-    private void applyHeuristic(ClaimCase claim, String text) {
-        setPhone(claim, ClaimTexts.phoneOf(text));
-        setIfBlank(claim::getCustomerAddress, claim::setCustomerAddress, ClaimTexts.addressOf(text));
-        if (ClaimTexts.blank(claim.getCustomerType())) {
-            String type = customerType(text);
-            if (!type.isBlank()) {
-                claim.setCustomerType(type);
-            }
-        }
-        if (ClaimTexts.blank(claim.getCustomerDemand())) {
-            if (text.contains("退款")) {
-                claim.setCustomerDemand("退款");
-            } else if (text.contains("补发") || text.contains("重发")) {
-                claim.setCustomerDemand("补发");
-            } else if (text.contains("索赔") || text.contains("赔偿")) {
-                claim.setCustomerDemand(ClaimTexts.clip(text, 80));
-            }
-        }
-        String logistics = text.replaceAll(".*?(SF\\d{8,}).*", "$1");
-        if (ClaimTexts.blank(claim.getLogisticsNo()) && logistics.startsWith("SF")) {
-            claim.setLogisticsNo(logistics);
-        }
-    }
-
-    private void applyAi(ClaimCase claim, String dialogue) {
-        if (!aiChatService.isEnabled() || dialogue.isBlank()) {
+    private void applyAi(ClaimCase claim, String latest) {
+        if (!aiChatService.isEnabled() || latest.isBlank()) {
             return;
         }
         String system = """
-                你是理赔信息抽取器。只根据对话抽取事实，不知道的字段用空字符串，不要编造。
+                你是理赔信息抽取器。只分析用户最新这一句话里已经说出的事实。
+                没提到的字段用空字符串，不要编造，不要把整句原文塞进一个字段。
+                机器人之前的提问不算用户提供的信息。
                 只输出一个 JSON 对象，字段为：customerName, customerPhone, customerAddress, memberNo, customerType, consumeSummary, productCategory, productName, productSpec, storeName, purchaseDate, orderNo, logisticsNo, logisticsSummary, symptom, cookingMethod, customerDemand。
-                customerType 只能是 新客、老客 或空字符串。
+                customerType 只能是 新客、老客 或空字符串。symptom 用简短现象，例如肉老、膻味、缺斤、异物、开化。
                 """;
         try {
-            String raw = aiChatService.chat(system, "已记录：\n" + snapshot(claim) + "\n对话：\n" + dialogue, null, 0.1);
+            String raw = aiChatService.chat(system, "已记录：\n" + snapshot(claim) + "\n用户最新一句：\n" + latest, null, 0.1);
             JsonNode node = readJson(raw);
             if (node == null) {
                 return;
@@ -547,6 +551,120 @@ public class ClaimConversationService {
         message.setMsgType(type);
         message.setContent(content);
         messageMapper.insert(message);
+    }
+
+    private String nameOf(String text) {
+        Matcher titled = Pattern.compile("([\\u4e00-\\u9fa5]{1,4}(?:先生|女士|小姐))").matcher(text);
+        if (titled.find()) {
+            return titled.group(1);
+        }
+        Matcher labeled = Pattern.compile("(?:姓名|顾客|客户)[:：\\s]*([\\u4e00-\\u9fa5]{2,4})").matcher(text);
+        return labeled.find() ? labeled.group(1) : "";
+    }
+
+    private String storeOf(String text) {
+        for (String store : List.of("京东", "天猫", "淘宝", "拼多多", "抖音", "微商城", "微信小店")) {
+            if (text.contains(store)) {
+                return store;
+            }
+        }
+        Matcher shop = Pattern.compile("([\\u4e00-\\u9fa5]{2,8}店)").matcher(text);
+        return shop.find() ? shop.group(1) : "";
+    }
+
+    private String productOf(String text) {
+        Matcher matcher = Pattern.compile("([\\u4e00-\\u9fa5A-Za-z0-9]{0,8}(?:牛|羊|排|腿|腩|肠|蔬菜|水果)[\\u4e00-\\u9fa5A-Za-z0-9]{0,8}(?:\\s*\\d+(?:\\.\\d+)?\\s*(?:公斤|斤|件|盒|袋))?)").matcher(text);
+        if (!matcher.find()) {
+            return "";
+        }
+        String found = matcher.group(1).trim();
+        int bought = found.lastIndexOf("买了");
+        if (bought >= 0) {
+            found = found.substring(bought + 2);
+        }
+        return found;
+    }
+
+    private String symptomOf(String text) {
+        List<String> hits = new ArrayList<>();
+        addSymptom(hits, text, "肉老", "肉老", "口感老", "柴", "嚼不动", "咬不动");
+        addSymptom(hits, text, "肉太肥", "太肥", "肥瘦", "油大");
+        addSymptom(hits, text, "膻味", "膻", "腥");
+        addSymptom(hits, text, "缺斤", "缺斤", "少两", "不够秤", "分量不够");
+        addSymptom(hits, text, "异物", "异物", "头发", "塑料", "虫子");
+        addSymptom(hits, text, "颜色发黑", "发黑", "不新鲜", "变色");
+        addSymptom(hits, text, "坏果", "坏果", "腐烂", "烂了");
+        addSymptom(hits, text, "开化", "开化");
+        addSymptom(hits, text, "发货地不满", "发货地", "不是新疆");
+        addSymptom(hits, text, "未收到", "丢失", "没收到", "未送到");
+        addSymptom(hits, text, "不香", "不香", "没味", "怪味");
+        return String.join("、", hits);
+    }
+
+    private void addSymptom(List<String> hits, String text, String label, String... words) {
+        for (String word : words) {
+            if (text.contains(word)) {
+                hits.add(label);
+                return;
+            }
+        }
+    }
+
+    private String demandOf(String text) {
+        if (text.contains("退款")) {
+            return "退款";
+        }
+        if (text.contains("补发") || text.contains("重发")) {
+            return "补发";
+        }
+        if (text.contains("换货")) {
+            return "换货";
+        }
+        if (text.contains("索赔") || text.contains("赔偿")) {
+            return "索赔";
+        }
+        return "";
+    }
+
+    private String cookingOf(String text) {
+        for (String method : List.of("红烧", "清炖", "火锅", "水煮", "煎", "烤", "蒸", "微波炉", "炖")) {
+            if (text.contains(method)) {
+                return method;
+            }
+        }
+        return "";
+    }
+
+    private String consumeOf(String text) {
+        if (text.contains("没买过") || text.contains("没有买过")) {
+            return "没买过同款";
+        }
+        if (text.contains("经常买") || text.contains("一直买")) {
+            return "经常买";
+        }
+        if (text.contains("第一次")) {
+            return "第一次";
+        }
+        int at = text.indexOf("买过");
+        if (at < 0) {
+            return "";
+        }
+        int end = Math.min(text.length(), at + 8);
+        return text.substring(at, end);
+    }
+
+    private String logisticsOf(String text) {
+        List<String> hits = new ArrayList<>();
+        for (String word : List.of("开化", "破损", "超时", "丢件", "未送达")) {
+            if (text.contains(word)) {
+                hits.add(word);
+            }
+        }
+        Matcher waybill = Pattern.compile("SF\\d{8,}").matcher(text);
+        if (waybill.find()) {
+            hits.add(waybill.group());
+        }
+        return String.join("、", hits);
     }
 
     private String customerType(String text) {
