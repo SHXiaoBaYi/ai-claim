@@ -1,5 +1,8 @@
 package com.base.admin.claim.support;
 
+import java.time.DayOfWeek;
+import java.time.LocalDate;
+import java.time.temporal.TemporalAdjusters;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -68,6 +71,87 @@ public final class ClaimTexts {
     public static boolean isSkipPhrase(String text) {
         String value = empty(text).replace(" ", "");
         return value.length() <= 12 && value.matches("(没有|无|不清楚|不知道|跳过|暂无|没照片|无法提供|没有照片|暂不清楚).*");
+    }
+
+    /** 用户要停掉正在录的投诉。长句里提到取消订单不算中断。 */
+    public static boolean isAbortPhrase(String text) {
+        String value = empty(text).replaceAll("\\s+", "");
+        if (value.isEmpty() || value.length() > 16) {
+            return false;
+        }
+        if (value.contains("新投诉") || value.contains("再录")) {
+            return false;
+        }
+        return value.matches(".*(不投诉了|取消投诉|中断投诉|终止投诉|停止投诉|结束投诉|不录了|先不录|别录了|不用录|不弄了|不做了|不处理了|先算了).*")
+                || value.matches("^(取消|中断|终止|停止|结束|算了|不用了|罢了|取消吧|结束吧|停止吧|算了吧)$");
+    }
+
+    public static String customerNameOf(String text) {
+        if (blank(text)) {
+            return "";
+        }
+        Matcher titled = Pattern.compile("([\\u4e00-\\u9fa5]{1,4}(?:先生|女士|小姐))").matcher(text);
+        if (titled.find()) {
+            return titled.group(1);
+        }
+        Matcher labeled = Pattern.compile("(?:姓名|顾客|客户)[:：\\s]*([\\u4e00-\\u9fa5]{2,4}?)(?=反馈|反映|反应|说|投诉|表示|在|于|买|购买|，|,|。|的)").matcher(text);
+        return labeled.find() ? labeled.group(1) : "";
+    }
+
+    public static String storeNameOf(String text) {
+        if (blank(text)) {
+            return "";
+        }
+        for (String store : new String[] {"京东", "天猫", "淘宝", "拼多多", "抖音", "微商城", "微信小店"}) {
+            if (text.contains(store)) {
+                return store;
+            }
+        }
+        Matcher at = Pattern.compile("在([\\u4e00-\\u9fa5A-Za-z0-9]{1,12}?店)").matcher(text);
+        return at.find() ? at.group(1) : "";
+    }
+
+    public static String productNameOf(String text) {
+        if (blank(text)) {
+            return "";
+        }
+        Matcher bought = Pattern.compile("(?:买的|购买的|买了|购买了)([\\u4e00-\\u9fa5A-Za-z0-9]{1,16}?)(?=太|很|不|有点|有些|发|坏|老|硬|柴|肥|缺|异|烂|臭|膻|腥|开化|变|漏|，|。|$)").matcher(text);
+        return bought.find() ? bought.group(1) : "";
+    }
+
+    /** 上周按上一个自然周周一到周日。今天 2026-11-11 时，上周是 2026-11-02～2026-11-08。 */
+    public static String purchaseDateOf(String text, LocalDate today) {
+        if (blank(text) || today == null) {
+            return "";
+        }
+        if (text.contains("上上周")) {
+            return weekRange(today, 2);
+        }
+        if (text.contains("上周") || text.contains("上个星期") || text.contains("上星期")) {
+            return weekRange(today, 1);
+        }
+        if (text.contains("本周") || text.contains("这周") || text.contains("这个星期")) {
+            return weekRange(today, 0);
+        }
+        if (text.contains("上个月")) {
+            LocalDate first = today.minusMonths(1).withDayOfMonth(1);
+            return first + "～" + first.withDayOfMonth(first.lengthOfMonth());
+        }
+        if (text.contains("前天")) {
+            return today.minusDays(2).toString();
+        }
+        if (text.contains("昨天")) {
+            return today.minusDays(1).toString();
+        }
+        if (text.contains("今天")) {
+            return today.toString();
+        }
+        return "";
+    }
+
+    private static String weekRange(LocalDate today, int weeksAgo) {
+        LocalDate monday = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).minusWeeks(weeksAgo);
+        return monday + "～" + monday.plusDays(6);
     }
 
     public static String clip(String text, int max) {

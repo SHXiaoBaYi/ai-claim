@@ -19,6 +19,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -73,6 +75,9 @@ public class ClaimConversationService {
 
     private String handleLocked(ClaimInbound inbound, String conversationId) {
         String text = ClaimTexts.empty(inbound.text());
+        if (ClaimTexts.isAbortPhrase(text)) {
+            return abort(inbound, conversationId, text);
+        }
         boolean fresh = text.contains("新投诉") || text.contains("新的投诉") || text.contains("再录一单");
         ClaimCase claim = current(conversationId);
         if (claim != null && fresh) {
@@ -80,8 +85,10 @@ public class ClaimConversationService {
             caseMapper.updateById(claim);
             claim = null;
         }
+        boolean created = false;
         if (claim == null || ClaimCase.RECOMMENDED.equals(claim.getStatus()) || ClaimCase.INTERRUPTED.equals(claim.getStatus())) {
             claim = create(inbound, conversationId);
+            created = true;
         }
         List<String> saved = saveFiles(claim.getId(), inbound.files());
         String userText = text;
@@ -96,6 +103,10 @@ public class ClaimConversationService {
         }
         applyFacts(claim, userText, !saved.isEmpty());
         fillCategory(claim);
+        if (created && saved.isEmpty() && !hasClaimFact(claim)) {
+            discard(claim.getId());
+            return openingScript();
+        }
         String reply;
         if (ready(claim)) {
             reply = finish(claim);
@@ -109,6 +120,77 @@ public class ClaimConversationService {
         reply = appendFileErrors(reply, inbound.files());
         saveMessage(claim.getId(), "bot", "text", reply);
         return reply;
+    }
+
+    private String abort(ClaimInbound inbound, String conversationId, String text) {
+        ClaimCase claim = current(conversationId);
+        if (claim == null) {
+            return "当前没有进行中的投诉。要记录时，直接发投诉内容。";
+        }
+        if (!text.isBlank()) {
+            saveMessage(claim.getId(), "user", inbound.msgType() == null ? "text" : inbound.msgType(), text);
+        }
+        saveFiles(claim.getId(), inbound.files());
+        claim.setStatus(ClaimCase.INTERRUPTED);
+        claim.setPendingSlot("");
+        caseMapper.updateById(claim);
+        String reply = "这张投诉已中断，不再继续追问。需要重新记录时，直接发投诉内容，或回复「新投诉」。";
+        saveMessage(claim.getId(), "bot", "text", reply);
+        return reply;
+    }
+
+    private void discard(Long caseId) {
+        List<ClaimMessage> messages = messageMapper.selectList(new LambdaQueryWrapper<ClaimMessage>()
+                .eq(ClaimMessage::getCaseId, caseId));
+        for (ClaimMessage message : messages) {
+            messageMapper.deleteById(message.getId());
+        }
+        caseMapper.deleteById(caseId);
+    }
+
+    private String openingScript() {
+        return "这句话里没有识别到投诉信息。请按这个说法发，尽量带上顾客、购买时间、门店、产品和具体问题：\n"
+                + "顾客张三反馈上周在克西路店买的羊肉太硬了。";
+    }
+
+    private boolean hasClaimFact(ClaimCase claim) {
+        return !ClaimTexts.blank(claim.getCustomerName())
+                || !ClaimTexts.blank(claim.getStoreName())
+                || !ClaimTexts.blank(claim.getProductName())
+                || !ClaimTexts.blank(claim.getSymptom())
+                || !ClaimTexts.blank(claim.getPurchaseDate())
+                || !ClaimTexts.blank(claim.getCustomerDemand())
+                || !ClaimTexts.blank(claim.getProductCategory())
+                || !ClaimTexts.blank(claim.getLogisticsSummary())
+                || !ClaimTexts.blank(claim.getCookingMethod());
+    }
+
+    /** 这句话里能确定的姓名、门店、产品、现象和相对日期，以这句话为准。 */
+    private void normalizeFacts(ClaimCase claim, String text) {
+        String name = ClaimTexts.customerNameOf(text);
+        if (!name.isBlank()) {
+            claim.setCustomerName(ClaimTexts.clip(name, 64));
+        }
+        String store = ClaimTexts.storeNameOf(text);
+        if (!store.isBlank()) {
+            claim.setStoreName(ClaimTexts.clip(store, 128));
+        }
+        String product = ClaimTexts.productNameOf(text);
+        if (!product.isBlank()) {
+            claim.setProductName(ClaimTexts.clip(product, 255));
+        }
+        String symptom = symptomOf(text);
+        if (!symptom.isBlank()) {
+            claim.setSymptom(ClaimTexts.clip(symptom, 255));
+        }
+        String date = ClaimTexts.purchaseDateOf(text, today());
+        if (!date.isBlank()) {
+            claim.setPurchaseDate(date);
+        }
+    }
+
+    private LocalDate today() {
+        return LocalDate.now(ZoneId.of("Asia/Shanghai"));
     }
 
     private ClaimCase current(String conversationId) {
@@ -183,8 +265,9 @@ public class ClaimConversationService {
             return;
         }
         if (!text.isBlank()) {
-            extractLocal(claim, text);
             applyAi(claim, text);
+            extractLocal(claim, text);
+            normalizeFacts(claim, text);
         }
         if ("evidence".equals(slot) && hasFile) {
             return;
@@ -215,11 +298,15 @@ public class ClaimConversationService {
 
     private void writeSlot(ClaimCase claim, String slot, String text) {
         switch (slot) {
-            case "customerPhone" -> setPhone(claim, ClaimTexts.phoneOf(text).isBlank() ? text : ClaimTexts.phoneOf(text));
-            case "customerName" -> setIfBlank(claim::getCustomerName, claim::setCustomerName, text);
-            case "storeName" -> setIfBlank(claim::getStoreName, claim::setStoreName, text);
-            case "productName" -> setIfBlank(claim::getProductName, claim::setProductName, text);
-            case "symptom" -> setIfBlank(claim::getSymptom, claim::setSymptom, text);
+            case "customerPhone" -> setPhone(claim, ClaimTexts.phoneOf(text));
+            case "customerName" -> setIfBlank(claim::getCustomerName, claim::setCustomerName,
+                    ClaimTexts.customerNameOf(text).isBlank() && text.length() <= 8 ? text : ClaimTexts.customerNameOf(text));
+            case "storeName" -> setIfBlank(claim::getStoreName, claim::setStoreName,
+                    ClaimTexts.storeNameOf(text).isBlank() && text.length() <= 16 ? text : ClaimTexts.storeNameOf(text));
+            case "productName" -> setIfBlank(claim::getProductName, claim::setProductName,
+                    ClaimTexts.productNameOf(text).isBlank() && text.length() <= 16 ? text : ClaimTexts.productNameOf(text));
+            case "symptom" -> setIfBlank(claim::getSymptom, claim::setSymptom,
+                    symptomOf(text).isBlank() && text.length() <= 16 ? text : symptomOf(text));
             case "customerDemand" -> setIfBlank(claim::getCustomerDemand, claim::setCustomerDemand, text);
             case "customerType" -> setIfBlank(claim::getCustomerType, claim::setCustomerType, customerType(text).isBlank() ? text : customerType(text));
             case "consumeSummary" -> setIfBlank(claim::getConsumeSummary, claim::setConsumeSummary, text);
@@ -237,11 +324,17 @@ public class ClaimConversationService {
         String system = """
                 你是理赔信息抽取器。只分析用户最新这一句话里已经说出的事实。
                 没提到的字段用空字符串，不要编造，不要把整句原文塞进一个字段。
+                和投诉无关的寒暄，所有字段都留空。
                 机器人之前的提问不算用户提供的信息。
+                今天是 %s。上周、上星期指上一个自然周周一到周日，写成 YYYY-MM-DD～YYYY-MM-DD，不要保留「上周」。
+                顾客只写姓名，不要带「反馈」。门店只写店名或平台。产品只写货品，不要带购买经过。
+                现象写成「产品+问题」，例如羊肉太硬，不要只写太硬或肉太硬。
+                示例：顾客张三反馈上周在克西路店买的羊肉太硬了
+                → customerName=张三，storeName=克西路店，productName=羊肉，symptom=羊肉太硬，purchaseDate=%s。
                 只输出一个 JSON 对象，字段为：customerName, customerPhone, customerAddress, memberNo, customerType, consumeSummary, productCategory, productName, productSpec, storeName, purchaseDate, orderNo, logisticsNo, logisticsSummary, symptom, cookingMethod, customerDemand。
-                customerType 只能是 新客、老客 或空字符串。symptom 用简短现象，例如肉老、膻味、缺斤、异物、开化、肉坏了。
+                customerType 只能是 新客、老客 或空字符串。
                 牛羊肉坏了、变质、不新鲜写成「肉坏了」，不要写成坏果。坏果只用于蔬菜和水果。
-                """;
+                """.formatted(today().toString(), ClaimTexts.purchaseDateOf("上周", today()));
         try {
             String raw = aiChatService.chat(system, "已记录：\n" + snapshot(claim) + "\n用户最新一句：\n" + latest, null, 0.1);
             JsonNode node = readJson(raw);
@@ -516,6 +609,7 @@ public class ClaimConversationService {
         add(parts, "门店", claim.getStoreName());
         add(parts, "产品", claim.getProductName());
         add(parts, "现象", claim.getSymptom());
+        add(parts, "购买时间", claim.getPurchaseDate());
         add(parts, "诉求", claim.getCustomerDemand());
         add(parts, "客群", claim.getCustomerType());
         if (parts.isEmpty()) {
@@ -572,39 +666,26 @@ public class ClaimConversationService {
     }
 
     private String nameOf(String text) {
-        Matcher titled = Pattern.compile("([\\u4e00-\\u9fa5]{1,4}(?:先生|女士|小姐))").matcher(text);
-        if (titled.find()) {
-            return titled.group(1);
-        }
-        Matcher labeled = Pattern.compile("(?:姓名|顾客|客户)[:：\\s]*([\\u4e00-\\u9fa5]{2,4})").matcher(text);
-        return labeled.find() ? labeled.group(1) : "";
+        return ClaimTexts.customerNameOf(text);
     }
 
     private String storeOf(String text) {
-        for (String store : List.of("京东", "天猫", "淘宝", "拼多多", "抖音", "微商城", "微信小店")) {
-            if (text.contains(store)) {
-                return store;
-            }
-        }
-        Matcher shop = Pattern.compile("([\\u4e00-\\u9fa5]{2,8}店)").matcher(text);
-        return shop.find() ? shop.group(1) : "";
+        return ClaimTexts.storeNameOf(text);
     }
 
     private String productOf(String text) {
-        Matcher matcher = Pattern.compile("([\\u4e00-\\u9fa5A-Za-z0-9]{0,8}(?:牛|羊|排|腿|腩|肠|蔬菜|水果)[\\u4e00-\\u9fa5A-Za-z0-9]{0,8}(?:\\s*\\d+(?:\\.\\d+)?\\s*(?:公斤|斤|件|盒|袋))?)").matcher(text);
-        if (!matcher.find()) {
-            return "";
-        }
-        String found = matcher.group(1).trim();
-        int bought = found.lastIndexOf("买了");
-        if (bought >= 0) {
-            found = found.substring(bought + 2);
-        }
-        return found;
+        return ClaimTexts.productNameOf(text);
     }
 
     private String symptomOf(String text) {
         List<String> hits = new ArrayList<>();
+        if (text.contains("羊") && (text.contains("太硬") || text.contains("很硬") || text.contains("硬了"))) {
+            hits.add("羊肉太硬");
+        } else if (text.contains("牛") && (text.contains("太硬") || text.contains("很硬") || text.contains("硬了"))) {
+            hits.add("牛肉太硬");
+        } else {
+            addSymptom(hits, text, "太硬", "太硬", "很硬", "硬了");
+        }
         addSymptom(hits, text, "肉老", "肉老", "口感老", "柴", "嚼不动", "咬不动");
         addSymptom(hits, text, "肉太肥", "太肥", "肥瘦", "油大");
         addSymptom(hits, text, "膻味", "膻", "腥");
