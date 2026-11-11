@@ -18,6 +18,7 @@ import com.base.admin.common.PageResult;
 import com.base.admin.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -30,6 +31,7 @@ public class ClaimArchiveService {
     private final ClaimMessageMapper messageMapper;
     private final ClaimEvidenceMapper evidenceMapper;
     private final ClaimHistoryCaseMapper historyMapper;
+    private final ClaimFileStorage fileStorage;
 
     public PageResult<ClaimCase> page(ClaimPageQueryDTO query) {
         LambdaQueryWrapper<ClaimCase> wrapper = new LambdaQueryWrapper<ClaimCase>()
@@ -88,6 +90,23 @@ public class ClaimArchiveService {
         archive.setRecommendation(ClaimTexts.empty(dto.getRecommendation()));
         archive.setRecommendationBasis(ClaimTexts.empty(dto.getRecommendationBasis()));
         caseMapper.updateById(archive);
+    }
+
+    @Transactional
+    public void delete(Long id) {
+        require(id);
+        List<ClaimMessage> messages = messageMapper.selectList(new LambdaQueryWrapper<ClaimMessage>()
+                .eq(ClaimMessage::getCaseId, id));
+        for (ClaimMessage message : messages) {
+            messageMapper.deleteById(message.getId());
+        }
+        List<ClaimEvidence> evidences = evidenceMapper.selectList(new LambdaQueryWrapper<ClaimEvidence>()
+                .eq(ClaimEvidence::getCaseId, id));
+        for (ClaimEvidence evidence : evidences) {
+            evidenceMapper.deleteById(evidence.getId());
+        }
+        fileStorage.deleteCaseDir(id);
+        caseMapper.deleteById(id);
     }
 
     public ClaimCase require(Long id) {

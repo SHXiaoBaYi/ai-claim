@@ -130,6 +130,10 @@ export function recommendClaimArchiveApi(id: number) {
   return request.post<unknown, ClaimCase>(`/claim/archive/${id}/recommend`);
 }
 
+export function deleteClaimArchiveApi(id: number) {
+  return request.delete(`/claim/archive/${id}`);
+}
+
 export function getClaimSopTreeApi() {
   return request.get<unknown, ClaimSopNode[]>('/claim/sop/tree');
 }

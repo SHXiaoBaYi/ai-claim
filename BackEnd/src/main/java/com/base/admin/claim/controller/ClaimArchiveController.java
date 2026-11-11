@@ -22,6 +22,7 @@ import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -63,6 +64,15 @@ public class ClaimArchiveController {
     @Log(title = "理赔档案", businessType = 2)
     public Result<Void> update(@Valid @RequestBody ClaimArchiveUpdateDTO dto) {
         archiveService.update(dto);
+        return Result.ok();
+    }
+
+    @Operation(summary = "删除理赔档案")
+    @DeleteMapping("/{id}")
+    @RequiresPermission("claim:archive:edit")
+    @Log(title = "理赔档案", businessType = 3)
+    public Result<Void> delete(@PathVariable Long id) {
+        archiveService.delete(id);
         return Result.ok();
     }
 

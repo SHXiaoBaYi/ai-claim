@@ -239,7 +239,8 @@ public class ClaimConversationService {
                 没提到的字段用空字符串，不要编造，不要把整句原文塞进一个字段。
                 机器人之前的提问不算用户提供的信息。
                 只输出一个 JSON 对象，字段为：customerName, customerPhone, customerAddress, memberNo, customerType, consumeSummary, productCategory, productName, productSpec, storeName, purchaseDate, orderNo, logisticsNo, logisticsSummary, symptom, cookingMethod, customerDemand。
-                customerType 只能是 新客、老客 或空字符串。symptom 用简短现象，例如肉老、膻味、缺斤、异物、开化。
+                customerType 只能是 新客、老客 或空字符串。symptom 用简短现象，例如肉老、膻味、缺斤、异物、开化、肉坏了。
+                牛羊肉坏了、变质、不新鲜写成「肉坏了」，不要写成坏果。坏果只用于蔬菜和水果。
                 """;
         try {
             String raw = aiChatService.chat(system, "已记录：\n" + snapshot(claim) + "\n用户最新一句：\n" + latest, null, 0.1);
@@ -335,6 +336,8 @@ public class ClaimConversationService {
         String system = """
                 你是小巴依理赔助手。建议必须执行依据里的「SOP 处理」，不能改成别的现象或别的处理。
                 参考案例只说明同一类现象以前怎么结案，不能用别的现象覆盖流程。
+                牛羊肉坏了、变质、不新鲜，只能按肉品「颜色发黑、不新鲜」或物流变质处理，禁止写成蔬菜坏果，也禁止引用蔬菜案例。
+                蔬菜水果坏了才用坏果。产品和参考案例品类不一致时，丢掉那条案例，不要写进建议。
                 不要发明流程里没有的赔偿倍数。缺斤查实才写退一赔三，异物索赔才写十倍且不足按 1000 元。
                 用中文，先写建议动作和货品或金额，再写一句原因，并点明依据的流程名称。不要输出 JSON。
                 """;
@@ -403,6 +406,20 @@ public class ClaimConversationService {
                 symptomScore += word.length();
             }
         }
+        String claimSide = ClaimTexts.empty(claim.getProductCategory()) + ClaimTexts.empty(claim.getProductName()) + ClaimTexts.empty(claim.getSymptom());
+        String rowSide = ClaimTexts.empty(row.getProductCategory()) + ClaimTexts.empty(row.getProductName()) + brief;
+        boolean claimMeat = ClaimTexts.meatText(claimSide) && !ClaimTexts.produceText(claimSide);
+        boolean rowProduce = ClaimTexts.produceText(rowSide) || brief.contains("坏果");
+        boolean rowMeat = ClaimTexts.meatText(rowSide);
+        if (claimMeat && rowProduce && !rowMeat) {
+            return 0;
+        }
+        if (ClaimTexts.produceText(claimSide) && !ClaimTexts.meatText(claimSide) && rowMeat && !ClaimTexts.produceText(rowSide)) {
+            return 0;
+        }
+        if (symptomScore == 0 && claimMeat && rowMeat && ClaimTexts.spoilageText(claimSide) && ClaimTexts.spoilageText(brief)) {
+            symptomScore = 3;
+        }
         if (symptomScore == 0) {
             return 0;
         }
@@ -469,7 +486,8 @@ public class ClaimConversationService {
         if (!ClaimTexts.blank(claim.getSymptomCode())) {
             return claim.getSymptomCode();
         }
-        ClaimSopNode node = sopService.matchSymptom(ClaimTexts.empty(claim.getSymptom()));
+        ClaimSopNode node = sopService.matchSymptom(ClaimTexts.empty(claim.getProductCategory()) + "\n"
+                + ClaimTexts.empty(claim.getProductName()) + "\n" + ClaimTexts.empty(claim.getSymptom()));
         if (node != null) {
             claim.setSymptomCode(node.getNodeCode());
             return node.getNodeCode();
@@ -592,8 +610,14 @@ public class ClaimConversationService {
         addSymptom(hits, text, "膻味", "膻", "腥");
         addSymptom(hits, text, "缺斤", "缺斤", "少两", "不够秤", "分量不够");
         addSymptom(hits, text, "异物", "异物", "头发", "塑料", "虫子");
+        if (ClaimTexts.meatText(text) && !ClaimTexts.produceText(text)
+                && ClaimTexts.spoilageText(text) && !text.contains("开化")) {
+            hits.add("肉坏了");
+        }
         addSymptom(hits, text, "颜色发黑", "发黑", "不新鲜", "变色");
-        addSymptom(hits, text, "坏果", "坏果", "腐烂", "烂了");
+        if (!ClaimTexts.meatText(text) || ClaimTexts.produceText(text)) {
+            addSymptom(hits, text, "坏果", "坏果", "腐烂", "烂了");
+        }
         addSymptom(hits, text, "开化", "开化");
         addSymptom(hits, text, "发货地不满", "发货地", "不是新疆");
         addSymptom(hits, text, "未收到", "丢失", "没收到", "未送到");

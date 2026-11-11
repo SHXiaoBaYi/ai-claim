@@ -1,8 +1,9 @@
 import { memo, useRef, useState } from 'react';
 import type { ActionType, ProColumnType } from '@ant-design/pro-components';
-import { App, Button, Descriptions, Drawer, Form, Input, Space, Tag } from 'antd';
+import { App, Button, Descriptions, Drawer, Form, Input, Popconfirm, Space, Tag } from 'antd';
 import BaseProTable from '@/components/BaseProTable';
 import {
+  deleteClaimArchiveApi,
   getClaimArchiveApi,
   getClaimArchiveListApi,
   openClaimEvidence,
@@ -49,6 +50,16 @@ const ClaimArchivePage = memo(function ClaimArchivePage() {
     }
   };
 
+  const remove = async (id: number) => {
+    await deleteClaimArchiveApi(id);
+    message.success('已删除');
+    if (detail?.archive.id === id) {
+      setOpen(false);
+      setDetail(null);
+    }
+    actionRef.current?.reload();
+  };
+
   const recommend = async () => {
     if (!detail?.archive.id) return;
     setSaving(true);
@@ -91,7 +102,7 @@ const ClaimArchivePage = memo(function ClaimArchivePage() {
     {
       title: '操作',
       valueType: 'option',
-      width: 90,
+      width: 120,
       render: (_, row) => [
         <Button
           key='view'
@@ -101,6 +112,22 @@ const ClaimArchivePage = memo(function ClaimArchivePage() {
         >
           查看
         </Button>,
+        <Popconfirm
+          key='delete'
+          title='删除这张档案？'
+          description='测试数据删除后不再显示，对话记录和照片一并去掉。'
+          okText='删除'
+          cancelText='取消'
+          onConfirm={() => remove(row.id)}
+        >
+          <Button
+            type='link'
+            danger
+            className='px-0'
+          >
+            删除
+          </Button>
+        </Popconfirm>,
       ],
     },
   ];
@@ -129,6 +156,15 @@ const ClaimArchivePage = memo(function ClaimArchivePage() {
         onClose={() => setOpen(false)}
         extra={
           <Space>
+            <Popconfirm
+              title='删除这张档案？'
+              description='测试数据删除后不再显示，对话记录和照片一并去掉。'
+              okText='删除'
+              cancelText='取消'
+              onConfirm={() => detail?.archive.id && remove(detail.archive.id)}
+            >
+              <Button danger>删除</Button>
+            </Popconfirm>
             <Button
               onClick={recommend}
               loading={saving}

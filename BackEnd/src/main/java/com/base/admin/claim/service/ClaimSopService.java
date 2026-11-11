@@ -95,30 +95,78 @@ public class ClaimSopService {
         }
     }
 
+    /** 已入库的流程不会整表重写。只修正「坏了」被绑在蔬菜坏果上、肉品坏了对不上的关键词。 */
+    @Transactional
+    public void patchKeywordTraps() {
+        ClaimSopNode veg = find("veg.bad");
+        if (veg != null) {
+            String keywords = ClaimTexts.empty(veg.getKeywords());
+            if (keywords.contains("坏了") && !keywords.contains("蔬菜坏了")) {
+                veg.setKeywords("坏果,蔬菜坏了,水果坏了,坏菜");
+                veg.setContent("问存放方式，看是个别坏果还是整箱较多，并要照片。只用于蔬菜水果，牛羊肉坏了不要用这个分支。");
+                sopNodeMapper.updateById(veg);
+            }
+        }
+        ClaimSopNode color = find("product.color");
+        if (color != null && !ClaimTexts.empty(color.getKeywords()).contains("肉坏了")) {
+            String keywords = ClaimTexts.empty(color.getKeywords());
+            if (keywords.isBlank()) {
+                keywords = "发黑,不新鲜,变色,发暗";
+            }
+            color.setKeywords(keywords + ",肉坏了,变质了");
+            sopNodeMapper.updateById(color);
+        }
+    }
+
     public ClaimSopNode matchSymptom(String blob) {
         String text = ClaimTexts.empty(blob);
+        boolean meat = ClaimTexts.meatText(text);
+        boolean produce = ClaimTexts.produceText(text);
         ClaimSopNode best = null;
         int bestScore = 0;
         for (ClaimSopNode node : all()) {
             if (!"SYMPTOM".equals(node.getNodeType()) || ClaimTexts.blank(node.getKeywords())) {
                 continue;
             }
+            if (node.getNodeCode().startsWith("veg.") && meat && !produce) {
+                continue;
+            }
             int score = 0;
             for (String keyword : node.getKeywords().split(",")) {
                 String word = keyword.trim();
-                if (word.length() >= 1 && text.contains(word)) {
-                    score += word.length();
+                if (word.length() < 1 || !text.contains(word)) {
+                    continue;
                 }
+                if ("坏了".equals(word) && node.getNodeCode().startsWith("veg.") && !produce) {
+                    continue;
+                }
+                score += word.length();
             }
             if (score > bestScore) {
                 bestScore = score;
                 best = node;
             }
         }
-        if (text.contains("开化") && (text.contains("异味") || text.contains("臭") || text.contains("黏") || text.contains("粘") || text.contains("血水"))) {
+        if (text.contains("开化") && (text.contains("异味") || text.contains("臭") || text.contains("黏") || text.contains("粘") || text.contains("血水") || (meat && text.contains("坏了")))) {
             ClaimSopNode severe = find("logistics.severe");
             if (severe != null) {
                 return severe;
+            }
+        }
+        if (meat && !produce && ClaimTexts.spoilageText(text)) {
+            if (best == null || best.getNodeCode().startsWith("veg.")) {
+                ClaimSopNode color = find("product.color");
+                if (color != null) {
+                    return color;
+                }
+            }
+        }
+        if (produce && !meat && (text.contains("坏果") || text.contains("蔬菜坏了") || text.contains("水果坏了") || text.contains("坏菜"))) {
+            if (best == null || !best.getNodeCode().startsWith("veg.")) {
+                ClaimSopNode bad = find("veg.bad");
+                if (bad != null) {
+                    return bad;
+                }
             }
         }
         return best;

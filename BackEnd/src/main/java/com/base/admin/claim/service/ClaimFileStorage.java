@@ -39,6 +39,27 @@ public class ClaimFileStorage {
         return relative;
     }
 
+    public void deleteCaseDir(Long caseId) {
+        if (caseId == null) {
+            return;
+        }
+        Path dir = resolve(String.valueOf(caseId));
+        if (!Files.isDirectory(dir)) {
+            return;
+        }
+        try (var files = Files.walk(dir)) {
+            files.sorted((a, b) -> b.compareTo(a)).forEach(path -> {
+                try {
+                    Files.deleteIfExists(path);
+                } catch (IOException ex) {
+                    throw new BusinessException("证据文件删除失败");
+                }
+            });
+        } catch (IOException ex) {
+            throw new BusinessException("证据文件删除失败");
+        }
+    }
+
     public Path resolve(String relative) {
         Path root = paths.dataDocs().toAbsolutePath().normalize();
         Path target = root.resolve(relative == null ? "" : relative).normalize();

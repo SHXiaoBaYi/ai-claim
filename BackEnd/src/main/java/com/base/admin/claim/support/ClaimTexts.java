@@ -23,6 +23,16 @@ public final class ClaimTexts {
         if (blank(text)) {
             return "";
         }
+        String digits = text.replaceAll("\\D", "");
+        if (digits.startsWith("86") && digits.length() >= 13) {
+            digits = digits.substring(digits.length() - 11);
+        }
+        if (digits.length() >= 11) {
+            Matcher compact = PHONE.matcher(digits);
+            if (compact.find()) {
+                return compact.group();
+            }
+        }
         Matcher matcher = PHONE.matcher(text);
         return matcher.find() ? matcher.group() : "";
     }
@@ -63,5 +73,26 @@ public final class ClaimTexts {
     public static String clip(String text, int max) {
         String value = empty(text);
         return value.length() <= max ? value : value.substring(0, max);
+    }
+
+    /** 牛羊肉等肉品。不用单字「果」，避免「坏果」被当成水果。 */
+    public static boolean meatText(String text) {
+        String value = empty(text);
+        return value.contains("羊") || value.contains("牛") || value.contains("肉")
+                || value.contains("排骨") || value.contains("牛腩");
+    }
+
+    public static boolean produceText(String text) {
+        String value = empty(text);
+        return value.contains("蔬") || value.contains("水果") || value.contains("果蔬")
+                || value.contains("青菜") || value.contains("有机菜") || value.contains("瓜")
+                || value.contains("番茄") || value.contains("菌") || value.contains("草莓");
+    }
+
+    public static boolean spoilageText(String text) {
+        String value = empty(text);
+        return value.contains("坏了") || value.contains("变质") || value.contains("腐烂")
+                || value.contains("烂了") || value.contains("不新鲜") || value.contains("发臭")
+                || value.contains("发黑") || value.contains("肉坏了");
     }
 }

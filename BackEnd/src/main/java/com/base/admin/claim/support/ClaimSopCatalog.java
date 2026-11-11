@@ -59,7 +59,7 @@ public final class ClaimSopCatalog {
         list.add(new Seed("product.weight.gift", "product.weight", "ACTION", "礼盒", "精品少称的可能性很低。先和物流核对发货或在途重量。确认没问题后说明无法少称；顾客坚持再走平台售后，并准备称重资料。", "", 2));
         list.add(new Seed("product.weight.confirmed", "product.weight", "ACTION", "查实确实缺斤", "按消协调一赔三，不满 500 元按 500 元。", "", 3));
 
-        list.add(new Seed("product.color", "product", "SYMPTOM", "颜色发黑、不新鲜", "要两张自然光、无滤镜、不同角度的实物照片，并分清是物流储存还是顾客储存。", "发黑,不新鲜,变色,发暗", 6));
+        list.add(new Seed("product.color", "product", "SYMPTOM", "颜色发黑、不新鲜", "要两张自然光、无滤镜、不同角度的实物照片，并分清是物流储存还是顾客储存。肉坏了也走这里，不要当成蔬菜坏果。", "发黑,不新鲜,变色,发暗,肉坏了,变质了", 6));
         list.add(new Seed("product.color.logistics", "product.color", "ACTION", "物流和储存条件正常", "货品可能有问题：道歉，并全额退款或补发。", "", 1));
         list.add(new Seed("product.color.customer", "product.color", "ACTION", "顾客储存导致", "原则上不售后。只按消费力、积分和客群关系决定是否赠送 1 件，并说明责任不在商家，后续再因储存变质不再受理。", "", 2));
 
@@ -69,7 +69,7 @@ public final class ClaimSopCatalog {
         list.add(new Seed("product.foreign.fake", "product.foreign", "ACTION", "人为做假嫌疑大", "先要消费凭证，并把货品寄回公司查看后再谈赔偿。不同意寄回可以拒绝处理。", "", 3));
 
         list.add(new Seed("veg", "", "CATEGORY", "蔬菜质量", "按坏果数量、外箱是否破损、以及近期同品是否集中反馈来分支。", "", 2));
-        list.add(new Seed("veg.bad", "veg", "SYMPTOM", "坏果", "问存放方式，看是个别坏果还是整箱较多，并要照片。", "坏果,腐烂,烂了,坏了", 1));
+        list.add(new Seed("veg.bad", "veg", "SYMPTOM", "坏果", "问存放方式，看是个别坏果还是整箱较多，并要照片。只用于蔬菜水果，牛羊肉坏了不要用这个分支。", "坏果,蔬菜坏了,水果坏了,坏菜", 1));
         list.add(new Seed("veg.bad.few", "veg.bad", "ACTION", "个别坏果", "一箱里几个坏的，按质量问题重新赠送 1 箱。只有 1 到 2 个过熟裂口或变软，解释后建议先吃；顾客不接受可补 30 元或 50 元代金券。指定哪几样不新鲜，就只理赔那几样。", "", 1));
         list.add(new Seed("veg.bad.many", "veg.bad", "ACTION", "坏果较多", "存放正常的，全部蔬菜重新补送。菜品腐烂可补发、原单退款或赠送有机蔬菜，三选一。", "", 2));
         list.add(new Seed("veg.crush", "veg", "SYMPTOM", "压坏、破损", "要不同角度照片，区分外箱破损还是箱子完好、里面压坏。", "压坏,破损,外箱,包装坏", 2));
