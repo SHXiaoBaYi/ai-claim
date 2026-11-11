@@ -80,7 +80,7 @@ export default function BasicLayout() {
 
   return (
     <ProLayout
-      title='小巴依(上海)自动算薪系统'
+      title='小巴依理赔投诉系统'
       layout='mix'
       collapsed={collapsed}
       onCollapse={setCollapsed}

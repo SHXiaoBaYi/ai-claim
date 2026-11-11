@@ -1,4 +1,4 @@
-# 生产 profile：与测试相同，只连 ECS 47.99.95.38 本机 MySQL
+# 生产 profile：与测试相同，只连 ECS 47.103.191.164 本机 MySQL
 xby:
   rds:
     external-host: 127.0.0.1
@@ -7,7 +7,7 @@ xby:
     database: base_admin
     username: ${RDS_USERNAME:xiaobayi0099}
     password: ${RDS_PASSWORD:Xby@123456}
-  upload-public-base: ${UPLOAD_PUBLIC_BASE:http://47.99.95.38/shxby/api}
+  upload-public-base: ${UPLOAD_PUBLIC_BASE:http://47.103.191.164/shxby/api}
   auth:
     password-login-enabled: false
 

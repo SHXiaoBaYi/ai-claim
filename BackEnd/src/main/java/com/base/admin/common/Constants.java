@@ -9,7 +9,7 @@ public class Constants {
     /** 测试环境「同步生产数据 / 同步表结构」仅此账号可见可调 */
     public static final String ENV_SYNC_USERNAME = "wangfangyang";
     /** 项目唯一 ECS。测试与生产都连这台机器上的 MySQL。 */
-    public static final String ECS_HOST = "47.99.95.38";
+    public static final String ECS_HOST = "47.103.191.164";
 
     public static final String MENU_TYPE_DIR = "M";
     public static final String MENU_TYPE_MENU = "C";

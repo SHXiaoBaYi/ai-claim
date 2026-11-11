@@ -102,15 +102,18 @@ public class DingTalkSchemaMigrator implements ApplicationRunner {
                 UPDATE sys_menu
                 SET is_active = 0
                 WHERE is_active = 1
-                  AND menu_id NOT IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 140, 141, 142, 143, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224)
+                  AND (
+                    menu_id BETWEEN 200 AND 224
+                    OR path IN ('/payroll', 'payroll')
+                    OR component LIKE 'payroll/%'
+                    OR perms LIKE 'payroll:%'
+                    OR menu_id NOT IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 140, 141, 142, 143)
+                  )
                   AND component NOT IN (
                     'system/user/index', 'system/role/index', 'system/menu/index',
-                    'system/ai-provider/index', 'system/dingtalk/index',
-                    'payroll/employee/index', 'payroll/base/index', 'payroll/social/index',
-                    'payroll/dept/index', 'payroll/post/index', 'payroll/fee/index',
-                    'payroll/attendance/index', 'payroll/bulletin/index', 'payroll/calendar/index', 'payroll/grade/index', 'payroll/performance/index', 'payroll/reward/index'
+                    'system/ai-provider/index', 'system/dingtalk/index'
                   )
-                  AND NOT (menu_type = 'F' AND parent_id IN (2, 3, 4, 140, 142, 201, 203, 205, 207, 209, 211, 213, 215, 217, 219, 221, 223))
+                  AND NOT (menu_type = 'F' AND parent_id IN (2, 3, 4, 140, 142))
                 """);
         if (retired > 0) {
             log.info("已停用 {} 条非保留菜单", retired);

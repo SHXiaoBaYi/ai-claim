@@ -1,9 +1,9 @@
-# 本机经 ECS 47.99.95.38 转发到这台机器上的 MySQL
+# 本机经 ECS 47.103.191.164 转发到这台机器上的 MySQL
 # 用法：另开一个终端保持运行，再启动 BackEnd（profile=local）
 #   .\deploy\tunnel-test-rds.ps1
 param(
   [string]$Identity = '',
-  [string]$EcsHost = '47.99.95.38',
+  [string]$EcsHost = '47.103.191.164',
   [string]$EcsUser = 'root',
   [int]$LocalPort = 13307,
   [string]$RdsInternalHost = '127.0.0.1',

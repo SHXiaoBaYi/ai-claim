@@ -2,7 +2,7 @@ import { withBase } from '@/utils/basePath';
 
 /**
  * 附件根解析规则（禁止在前端源码写死生产/测试 ECS IP）：
- * 1) VITE_UPLOAD_PUBLIC_BASE（仅本地 .env，指向 47.99.95.38）
+ * 1) VITE_UPLOAD_PUBLIC_BASE（仅本地 .env，指向 47.103.191.164）
  * 2) 浏览器同源：当前页 origin + /shxby/api
  * 3) 无浏览器上下文：相对路径 withBase('/api/uploads/...')
  */

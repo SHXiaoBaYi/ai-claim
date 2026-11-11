@@ -4,7 +4,7 @@ server:
     context-path: /api
 
 spring:
-  # local/dev/test/prod 都只连 ECS 47.99.95.38 上的 MySQL。
+  # local/dev/test/prod 都只连 ECS 47.103.191.164 上的 MySQL。
   # 进程在这台机器上时用 127.0.0.1:3306；本机开发经隧道连同一台库。
   profiles:
     active: local
@@ -18,7 +18,7 @@ spring:
       max-file-size: 10MB
       max-request-size: 10MB
 
-# 唯一 ECS：47.99.95.38。测试与生产共用这台机器上的 MySQL（库名 base_admin）。
+# 唯一 ECS：47.103.191.164。测试与生产共用这台机器上的 MySQL（库名 base_admin）。
 xby:
   rds:
     external-host: 127.0.0.1
@@ -29,7 +29,7 @@ xby:
     password: ${RDS_PASSWORD:Xby@123456}
   upload-dir: ${UPLOAD_DIR:./uploads}
   # Java 代码不得再写死 IP 作 @Value 默认值
-  upload-public-base: ${UPLOAD_PUBLIC_BASE:http://47.99.95.38/shxby/api}
+  upload-public-base: ${UPLOAD_PUBLIC_BASE:http://47.103.191.164/shxby/api}
   # 账号密码登录：默认仅 localhost；测试环境在 application-test.yml 打开
   auth:
     password-login-enabled: ${XBY_PASSWORD_LOGIN_ENABLED:false}

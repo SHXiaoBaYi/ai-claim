@@ -17,7 +17,7 @@ import java.util.Locale;
 import java.util.stream.Collectors;
 
 /**
- * 测试与生产只允许连接 ECS 47.99.95.38 上的 MySQL（本机 127.0.0.1，或该公网地址）。
+ * 测试与生产只允许连接 ECS 47.103.191.164 上的 MySQL（本机 127.0.0.1，或该公网地址）。
  */
 @Slf4j
 @Component

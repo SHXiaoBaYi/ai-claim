@@ -1,4 +1,4 @@
-# 与 local 相同：本机经 SSH 隧道连 47.99.95.38 上的 MySQL
+# 与 local 相同：本机经 SSH 隧道连 47.103.191.164 上的 MySQL
 # 先运行：.\deploy\tunnel-test-rds.ps1
 server:
   port: 8099

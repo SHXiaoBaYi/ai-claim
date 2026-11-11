@@ -8,6 +8,7 @@ import { CODE_LOGIN_CONFLICT } from '@/api/request';
 import { getInfo, login, loginByDingTalk } from '@/store/slices/userSlice';
 import { message } from '@/store/slices/staticFunctionSlice';
 import type { AppDispatch } from '@/store';
+/** Pexels 免费商用：客服戴耳机处理来电与单据。https://www.pexels.com/photo/8192012/ */
 import loginBg from '@/assets/login-bg.jpg';
 
 const DD_LOGIN_SCRIPT = 'https://g.alicdn.com/dingding/h5-dingtalk-login/0.21.0/ddlogin.js';
@@ -234,129 +235,120 @@ export default function Login() {
   const dingEnabled = !!options?.dingTalkEnabled && !!options.clientId;
 
   return (
-    <div
-      className='relative flex min-h-screen items-center justify-center overflow-hidden md:justify-start'
-      style={{
-        background: `url(${loginBg}) center/cover no-repeat`,
-      }}
-    >
-      <div
-        className='absolute rounded-full'
-        style={{
-          width: 520,
-          height: 520,
-          background: 'radial-gradient(circle, rgba(59,130,246,0.35) 70%, transparent 70%)',
-          filter: 'blur(60px)',
-          top: -160,
-          right: -120,
-        }}
-      />
-      <div
-        className='absolute rounded-full'
-        style={{
-          width: 400,
-          height: 400,
-          background: 'radial-gradient(circle, rgba(99,102,241,0.3) 70%, transparent 70%)',
-          filter: 'blur(60px)',
-          bottom: -120,
-          left: -100,
-        }}
-      />
-
-      <Card
-        className='relative w-100 rounded-2xl! shadow-xl backdrop-blur-sm md:mr-40! md:ml-auto!'
-        variant='borderless'
-        style={{ background: 'rgba(255, 255, 255, 0.75)' }}
-        styles={{ body: { padding: '40px 36px 32px' } }}
-      >
-        <div className='mb-6 text-center'>
-          <div
-            className='mb-4 inline-flex h-14 w-14 items-center justify-center rounded-2xl'
-            style={{ background: 'linear-gradient(135deg, var(--ant-color-primary), var(--ant-color-primary-hover))' }}
-          >
-            <span className='text-2xl font-bold text-white'>小</span>
-          </div>
-          <h1 className='text-xl font-bold tracking-tight text-gray-800'>小巴依(上海)自动算薪系统</h1>
-          <p className='mt-1.5 text-sm text-gray-400'>
-            {localPassword ? '本机可使用账号密码或钉钉扫码登录' : '请使用钉钉扫码登录'}
+    <div className='flex min-h-screen flex-col bg-slate-100 lg:flex-row'>
+      <section className='relative h-52 shrink-0 overflow-hidden lg:h-auto lg:w-[58%]'>
+        <img
+          src={loginBg}
+          alt='客服人员正在受理来电并核对单据'
+          className='absolute inset-0 h-full w-full object-cover object-[28%_center]'
+        />
+        <div className='absolute inset-0 bg-linear-to-t from-slate-950/80 via-slate-950/35 to-slate-950/15' />
+        <div className='absolute inset-x-0 bottom-0 p-6 text-white lg:p-12'>
+          <p className='text-sm tracking-[0.2em] text-white/75'>顾客服务</p>
+          <h1 className='mt-2 text-2xl font-semibold tracking-tight lg:text-4xl'>小巴依理赔投诉系统</h1>
+          <p className='mt-3 hidden max-w-md text-sm leading-6 text-white/85 lg:block'>
+            受理顾客投诉，核对理赔材料，把每次处理留在系统里。
           </p>
         </div>
+      </section>
 
-        <Spin spinning={configLoading || loading}>
-          {dingEnabled ? (
-            <div className='flex flex-col items-center gap-3'>
-              <div
-                id={QR_BOX_ID}
-                key={qrKey}
-                className='flex h-[300px] w-[300px] items-center justify-center overflow-hidden rounded-lg bg-white'
-              />
-              {qrError ? <p className='text-center text-sm text-red-500'>{qrError}</p> : null}
-              <Button
-                type='link'
-                icon={<ReloadOutlined />}
-                onClick={() => {
-                  loggingRef.current = false;
-                  setQrKey((k) => k + 1);
-                }}
-              >
-                刷新二维码
-              </Button>
-              <p className='text-center text-xs text-gray-400'>仅支持已在系统中登记手机号的企业钉钉扫码</p>
+      <div className='flex flex-1 items-center justify-center px-4 py-8'>
+        <Card
+          className='w-full max-w-100 rounded-2xl! shadow-xl'
+          variant='borderless'
+          styles={{ body: { padding: '40px 36px 32px' } }}
+        >
+          <div className='mb-6 text-center'>
+            <div
+              className='mb-4 inline-flex h-14 w-14 items-center justify-center rounded-2xl'
+              style={{
+                background: 'linear-gradient(135deg, var(--ant-color-primary), var(--ant-color-primary-hover))',
+              }}
+            >
+              <span className='text-2xl font-bold text-white'>小</span>
             </div>
-          ) : !configLoading && !localPassword ? (
-            <div className='rounded-lg bg-amber-50 px-4 py-6 text-center text-sm text-amber-800'>
-              钉钉扫码登录未配置，请联系管理员
-            </div>
-          ) : null}
+            <h2 className='text-xl font-bold tracking-tight text-gray-800'>欢迎登录</h2>
+            <p className='mt-1.5 text-sm text-gray-400'>
+              {localPassword ? '本机可使用账号密码或钉钉扫码登录' : '请使用钉钉扫码登录'}
+            </p>
+          </div>
 
-          {localPassword ? (
-            <div className={dingEnabled ? 'mt-2' : undefined}>
-              {dingEnabled ? (
-                <Divider plain>
-                  <span className='text-xs text-gray-400'>本机账号密码</span>
-                </Divider>
-              ) : null}
-              <Form
-                form={form}
-                size='large'
-                onFinish={(values) => void completePasswordLogin(values.username, values.password)}
-              >
-                <Form.Item
-                  name='username'
-                  rules={[{ required: true, message: '请输入用户名' }]}
+          <Spin spinning={configLoading || loading}>
+            {dingEnabled ? (
+              <div className='flex flex-col items-center gap-3'>
+                <div
+                  id={QR_BOX_ID}
+                  key={qrKey}
+                  className='flex h-[300px] w-[300px] items-center justify-center overflow-hidden rounded-lg bg-white'
+                />
+                {qrError ? <p className='text-center text-sm text-red-500'>{qrError}</p> : null}
+                <Button
+                  type='link'
+                  icon={<ReloadOutlined />}
+                  onClick={() => {
+                    loggingRef.current = false;
+                    setQrKey((k) => k + 1);
+                  }}
                 >
-                  <Input
-                    prefix={<UserOutlined className='text-gray-400' />}
-                    placeholder='用户名'
-                    className='rounded-lg!'
-                  />
-                </Form.Item>
-                <Form.Item
-                  name='password'
-                  rules={[{ required: true, message: '请输入密码' }]}
+                  刷新二维码
+                </Button>
+                <p className='text-center text-xs text-gray-400'>仅支持已在系统中登记手机号的企业钉钉扫码</p>
+              </div>
+            ) : !configLoading && !localPassword ? (
+              <div className='rounded-lg bg-amber-50 px-4 py-6 text-center text-sm text-amber-800'>
+                钉钉扫码登录未配置，请联系管理员
+              </div>
+            ) : null}
+
+            {localPassword ? (
+              <div className={dingEnabled ? 'mt-2' : undefined}>
+                {dingEnabled ? (
+                  <Divider plain>
+                    <span className='text-xs text-gray-400'>本机账号密码</span>
+                  </Divider>
+                ) : null}
+                <Form
+                  form={form}
+                  size='large'
+                  onFinish={(values) => void completePasswordLogin(values.username, values.password)}
                 >
-                  <Input.Password
-                    prefix={<LockOutlined className='text-gray-400' />}
-                    placeholder='密码'
-                    className='rounded-lg!'
-                  />
-                </Form.Item>
-                <Form.Item className='mb-0!'>
-                  <Button
-                    type='primary'
-                    htmlType='submit'
-                    loading={loading}
-                    block
-                    className='h-11! rounded-lg! text-base! font-medium!'
+                  <Form.Item
+                    name='username'
+                    rules={[{ required: true, message: '请输入用户名' }]}
                   >
-                    登 录
-                  </Button>
-                </Form.Item>
-              </Form>
-            </div>
-          ) : null}
-        </Spin>
-      </Card>
+                    <Input
+                      prefix={<UserOutlined className='text-gray-400' />}
+                      placeholder='用户名'
+                      className='rounded-lg!'
+                    />
+                  </Form.Item>
+                  <Form.Item
+                    name='password'
+                    rules={[{ required: true, message: '请输入密码' }]}
+                  >
+                    <Input.Password
+                      prefix={<LockOutlined className='text-gray-400' />}
+                      placeholder='密码'
+                      className='rounded-lg!'
+                    />
+                  </Form.Item>
+                  <Form.Item className='mb-0!'>
+                    <Button
+                      type='primary'
+                      htmlType='submit'
+                      loading={loading}
+                      block
+                      className='h-11! rounded-lg! text-base! font-medium!'
+                    >
+                      登 录
+                    </Button>
+                  </Form.Item>
+                </Form>
+              </div>
+            ) : null}
+          </Spin>
+        </Card>
+      </div>
     </div>
   );
 }

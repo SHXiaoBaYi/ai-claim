@@ -16,7 +16,7 @@ import org.springframework.util.StringUtils;
 public class EnvPublicBaseGuard implements ApplicationRunner {
 
     private static final Logger log = LoggerFactory.getLogger(EnvPublicBaseGuard.class);
-    private static final String ECS_HOST = "47.99.95.38";
+    private static final String ECS_HOST = "47.103.191.164";
 
     private final Environment environment;
 
