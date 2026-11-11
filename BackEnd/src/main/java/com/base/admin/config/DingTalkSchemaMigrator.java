@@ -114,6 +114,10 @@ public class DingTalkSchemaMigrator implements ApplicationRunner {
                     'system/ai-provider/index', 'system/dingtalk/index'
                   )
                   AND NOT (menu_type = 'F' AND parent_id IN (2, 3, 4, 140, 142))
+                  AND IFNULL(perms, '') NOT LIKE 'claim:%'
+                  AND IFNULL(component, '') NOT LIKE 'claim/%'
+                  AND IFNULL(path, '') <> 'claim'
+                  AND menu_id NOT BETWEEN 300 AND 319
                 """);
         if (retired > 0) {
             log.info("已停用 {} 条非保留菜单", retired);

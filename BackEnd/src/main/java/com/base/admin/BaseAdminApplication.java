@@ -5,7 +5,7 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 @SpringBootApplication
-@MapperScan("com.base.admin.mapper")
+@MapperScan({"com.base.admin.mapper", "com.base.admin.claim.mapper"})
 public class BaseAdminApplication {
 
     public static void main(String[] args) {

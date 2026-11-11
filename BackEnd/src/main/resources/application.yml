@@ -49,6 +49,11 @@ xby:
     base-url: ${XBY_AI_BASE_URL:}
     model: ${XBY_AI_MODEL:}
     timeout-seconds: ${XBY_AI_TIMEOUT_SECONDS:60}
+  claim:
+    # 对话里的照片、视频。相对路径按后端启动目录解析，默认落到仓库根目录 data-docs
+    data-docs: ${CLAIM_DATA_DOCS:../data-docs}
+    # 三年客诉 Excel 所在目录，首次启动导入历史案例
+    history-dir: ${CLAIM_HISTORY_DIR:../docs}
 
 mybatis-plus:
   mapper-locations: classpath:mapper/*.xml
