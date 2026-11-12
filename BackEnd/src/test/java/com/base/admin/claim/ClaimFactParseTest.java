@@ -31,4 +31,12 @@ class ClaimFactParseTest {
         assertEquals("", ClaimTexts.customerNameOf("你好"));
         assertEquals("", ClaimTexts.productNameOf("你好"));
     }
+
+    @Test
+    void keepsComplaintYearWithTheSourceFile() {
+        assertEquals("2025-12-13", ClaimTexts.forceYear("2026-12-13", "2025"));
+        assertEquals("2025-08-24", ClaimTexts.forceYear("2025-08-24", "2025"));
+        assertEquals("2024-03-01", ClaimTexts.forceYear("2025-03-01", "2024"));
+        assertEquals("", ClaimTexts.forceYear("", "2025"));
+    }
 }

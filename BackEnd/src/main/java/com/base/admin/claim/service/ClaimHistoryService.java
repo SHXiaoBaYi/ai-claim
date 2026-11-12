@@ -146,9 +146,18 @@ public class ClaimHistoryService {
             return;
         }
         String phone = ClaimTexts.phoneOf(name + " " + content);
-        String date = ClaimHistoryExcel.text(row, "投诉日期");
+        String rawDate = ClaimHistoryExcel.text(row, "投诉日期");
+        String rawPurchase = ClaimHistoryExcel.text(row, "购买日期");
+        String date = alignYear(rawDate, year);
+        String purchase = alignYear(rawPurchase, year);
         ClaimHistoryCase found = historyMapper.selectOne(new LambdaQueryWrapper<ClaimHistoryCase>()
-                .eq(ClaimHistoryCase::getDedupeKey, dedupe(year, date, phone, name, product, brief)));
+                .eq(ClaimHistoryCase::getDedupeKey, dedupe(year, date, phone, name, product, brief))
+                .last("limit 1"));
+        if (found == null && !date.equals(rawDate)) {
+            found = historyMapper.selectOne(new LambdaQueryWrapper<ClaimHistoryCase>()
+                    .eq(ClaimHistoryCase::getDedupeKey, dedupe(year, rawDate, phone, name, product, brief))
+                    .last("limit 1"));
+        }
         if (found != null && found.getManualEdited() != null && found.getManualEdited() == 1) {
             result.setSkipped(result.getSkipped() + 1);
             return;
@@ -158,7 +167,7 @@ public class ClaimHistoryService {
         target.setSourceYear(year);
         target.setSourceFile(fileName);
         target.setComplaintDate(date);
-        target.setPurchaseDate(ClaimHistoryExcel.text(row, "购买日期"));
+        target.setPurchaseDate(purchase);
         target.setComplaintType(ClaimHistoryExcel.text(row, "投诉类型"));
         target.setStoreName(ClaimHistoryExcel.text(row, "购买门店", "店面"));
         target.setRevisit(ClaimHistoryExcel.text(row, "是否回访"));
@@ -200,6 +209,13 @@ public class ClaimHistoryService {
         } catch (Exception ex) {
             return Integer.toHexString(raw.hashCode());
         }
+    }
+
+    private String alignYear(String value, String year) {
+        if (!"2024".equals(year) && !"2025".equals(year)) {
+            return value;
+        }
+        return ClaimTexts.forceYear(value, year);
     }
 
     private long pageNum(ClaimPageQueryDTO query) {

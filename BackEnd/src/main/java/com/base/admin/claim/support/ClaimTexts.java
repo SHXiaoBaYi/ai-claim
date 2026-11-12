@@ -3,6 +3,7 @@ package com.base.admin.claim.support;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.temporal.TemporalAdjusters;
+import java.time.YearMonth;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -157,6 +158,28 @@ public final class ClaimTexts {
     public static String clip(String text, int max) {
         String value = empty(text);
         return value.length() <= max ? value : value.substring(0, max);
+    }
+
+    /** 客诉表按文件年份归年。2026-12-13 在 2025 年文件里记为 2025-12-13。 */
+    public static String forceYear(String value, String year) {
+        String date = empty(value);
+        String target = empty(year);
+        if (!date.matches("\\d{4}-\\d{2}-\\d{2}") || !target.matches("\\d{4}") || date.startsWith(target + "-")) {
+            return date;
+        }
+        int month = Integer.parseInt(date.substring(5, 7));
+        int day = Integer.parseInt(date.substring(8, 10));
+        if (month < 1 || month > 12) {
+            return date;
+        }
+        int maxDay = YearMonth.of(Integer.parseInt(target), month).lengthOfMonth();
+        if (day < 1) {
+            return date;
+        }
+        if (day > maxDay) {
+            day = maxDay;
+        }
+        return target + "-" + String.format("%02d-%02d", month, day);
     }
 
     /** 牛羊肉等肉品。不用单字「果」，避免「坏果」被当成水果。 */
