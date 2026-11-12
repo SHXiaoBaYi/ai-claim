@@ -105,4 +105,10 @@ public class ClaimCase extends BaseEntity {
 
     @Schema(description = "参考历史案例 ID，逗号分隔")
     private String similarCaseIds;
+
+    @Schema(description = "免登查看历史参照的令牌")
+    private String referenceToken;
+
+    @Schema(description = "免登页要展示的案例，JSON")
+    private String referenceView;
 }

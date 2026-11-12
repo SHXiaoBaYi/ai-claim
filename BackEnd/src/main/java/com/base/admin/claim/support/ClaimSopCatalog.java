@@ -94,6 +94,8 @@ public final class ClaimSopCatalog {
         list.add(new Seed("service.origin", "service", "SYMPTOM", "发货地不满", "这类多是新客。先解释默认从中转站发货，时效和品质有保障。", "发货地,不是新疆,发货仓,中转", 1));
         list.add(new Seed("service.origin.unreceived", "service.origin", "ACTION", "还没收到货", "拦截原件，从新疆重新补发 1 件，并提醒以后有特殊需求可以提前说明。", "", 1));
         list.add(new Seed("service.origin.received", "service.origin", "ACTION", "已收到但非常不满", "从新疆再补发 1 件。按消费力和用途判断原件是赠送还是上门取回。", "", 2));
+        list.add(new Seed("service.short", "service", "SYMPTOM", "漏装、货品不够", "先核对订单件数和顾客实收，分清是少送、漏装，还是顾客看错数量。不要按缺斤少两处理。", "货品不够,漏装,少发,少送,漏货,少配", 2));
+        list.add(new Seed("service.short.verify", "service.short", "ACTION", "核实后补发缺少的部分", "确实少送或漏装的，补发缺少的货品，并按责任追责。核实没有少送的，向顾客说明，不做赔偿。不要按缺斤走退一赔三。", "", 1));
         return list;
     }
 }

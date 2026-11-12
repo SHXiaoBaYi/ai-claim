@@ -26,6 +26,7 @@ public class ClaimDataInitializer implements ApplicationRunner {
         fileStorage.ensureRoot();
         sopService.seedIfEmpty();
         sopService.patchKeywordTraps();
+        sopService.ensureCatalogNodes();
         try {
             historyService.importIfEmpty();
         } catch (Exception ex) {

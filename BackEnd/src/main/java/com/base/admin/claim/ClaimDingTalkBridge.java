@@ -37,6 +37,9 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 @Slf4j
 @Component
@@ -52,6 +55,11 @@ public class ClaimDingTalkBridge implements ApplicationRunner {
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
     private final ExecutorService executor = Executors.newFixedThreadPool(4, runnable -> {
         Thread thread = new Thread(runnable, "claim-dingtalk");
+        thread.setDaemon(true);
+        return thread;
+    });
+    private final ScheduledExecutorService waitingPool = Executors.newScheduledThreadPool(2, runnable -> {
+        Thread thread = new Thread(runnable, "claim-wait");
         thread.setDaemon(true);
         return thread;
     });
@@ -71,6 +79,7 @@ public class ClaimDingTalkBridge implements ApplicationRunner {
     public void shutdown() {
         stopQuietly();
         executor.shutdownNow();
+        waitingPool.shutdownNow();
     }
 
     public ClaimRobotVO get() {
@@ -143,12 +152,20 @@ public class ClaimDingTalkBridge implements ApplicationRunner {
     }
 
     private void safeHandle(ChatbotMessage message) {
+        String webhook = message == null ? "" : message.getSessionWebhook();
+        WaitingPace pace = new WaitingPace(webhook);
         try {
-            String reply = conversationService.handle(toInbound(message));
-            send(message.getSessionWebhook(), reply);
+            String reply = conversationService.handle(toInbound(message), pace);
+            ClaimConversationService.ClaimAction action = conversationService.takeAction();
+            if (action != null && !ClaimTexts.blank(action.url())) {
+                sendAction(webhook, reply, action.title(), action.url());
+            } else {
+                send(webhook, reply);
+            }
         } catch (Exception ex) {
             log.error("处理理赔单聊失败", ex);
-            send(message == null ? "" : message.getSessionWebhook(), "这张投诉暂时没处理成功，请再发一次。");
+            pace.stopWaiting();
+            send(webhook, "这张投诉暂时没处理成功，请再发一次。");
         }
     }
 
@@ -280,6 +297,61 @@ public class ClaimDingTalkBridge implements ApplicationRunner {
             }
         } catch (Exception ex) {
             log.error("理赔机器人回复失败: {}", ex.getMessage());
+        }
+    }
+
+    private void sendAction(String webhook, String text, String title, String url) {
+        if (ClaimTexts.blank(webhook)) {
+            return;
+        }
+        try {
+            String body = objectMapper.writeValueAsString(java.util.Map.of(
+                    "msgtype", "actionCard",
+                    "actionCard", java.util.Map.of(
+                            "title", "理赔建议",
+                            "text", ClaimTexts.blank(text) ? "综合建议：请人工处理。" : text,
+                            "singleTitle", ClaimTexts.blank(title) ? "查看历史参照案例" : title,
+                            "singleURL", url)));
+            HttpRequest request = HttpRequest.newBuilder(URI.create(webhook))
+                    .timeout(Duration.ofSeconds(15))
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(body))
+                    .build();
+            HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() >= 300) {
+                send(webhook, text + "\n\n" + title + "：" + url);
+            }
+        } catch (Exception ex) {
+            log.warn("理赔建议按钮发送失败: {}", ex.getMessage());
+            send(webhook, text + "\n\n" + title + "：" + url);
+        }
+    }
+
+    private final class WaitingPace implements ClaimConversationService.ClaimPace {
+        private final String webhook;
+        private volatile boolean stopped;
+        private ScheduledFuture<?> future;
+
+        private WaitingPace(String webhook) {
+            this.webhook = webhook;
+        }
+
+        @Override
+        public void startWaiting() {
+            stopped = false;
+            future = waitingPool.scheduleAtFixedRate(() -> {
+                if (!stopped) {
+                    send(webhook, "正在对照历史案例。。。请稍后。");
+                }
+            }, 0, 10, TimeUnit.SECONDS);
+        }
+
+        @Override
+        public void stopWaiting() {
+            stopped = true;
+            if (future != null) {
+                future.cancel(false);
+            }
         }
     }
 

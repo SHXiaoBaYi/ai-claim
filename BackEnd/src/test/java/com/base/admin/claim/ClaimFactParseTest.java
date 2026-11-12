@@ -39,4 +39,25 @@ class ClaimFactParseTest {
         assertEquals("2024-03-01", ClaimTexts.forceYear("2025-03-01", "2024"));
         assertEquals("", ClaimTexts.forceYear("", "2025"));
     }
+
+    @Test
+    void scoresBidirectionalEntailmentAndSkipsNoClaimWording() {
+        assertEquals(0.93, ClaimTexts.bidirectionalEquivalence("entailment", 0.96, "蕴含", 0.93));
+        assertEquals(0.85, ClaimTexts.bidirectionalEquivalence("entailment", 0.96, "entailment", 0.85));
+        assertEquals(0.89, ClaimTexts.bidirectionalEquivalence("entailment", 0.97, "neutral", 0.4));
+        assertEquals(0, ClaimTexts.bidirectionalEquivalence("entailment", 0.99, "contradiction", 0.9));
+        assertEquals(0, ClaimTexts.bidirectionalEquivalence("neutral", 0.6, "neutral", 0.6));
+        assertTrue(ClaimTexts.noClaimOutcome("不做处理"));
+        assertTrue(ClaimTexts.noClaimOutcome("核实后无需理赔"));
+        assertFalse(ClaimTexts.noClaimOutcome("追责处理"));
+        assertEquals("产品-不香、不好吃", ClaimTexts.labeledPhenomenon("产品-不香、不好吃"));
+        assertEquals("产品-不香、不好吃", ClaimTexts.labeledPhenomenon("顾客反馈产品-不香、不好吃，要求补发"));
+        assertTrue(ClaimTexts.samePhenomenon("不香、不好吃", "产品-不香、不好吃"));
+        assertFalse(ClaimTexts.samePhenomenon("不香", "产品-不香、不好吃"));
+        assertTrue(ClaimTexts.containsPhenomenon("原话：产品-不香、不好吃", "产品-不香、不好吃"));
+        assertFalse(ClaimTexts.containsPhenomenon("只说了不香", "产品-不香、不好吃"));
+        assertEquals("正在对照历史案例\n██████████░░░░░░░░░░ 50%", ClaimTexts.progressBar("正在对照历史案例", 1, 2));
+        assertTrue(ClaimTexts.progressBar("正在对照历史案例", 0, 4).endsWith("0%"));
+        assertTrue(ClaimTexts.progressBar("正在对照历史案例", 4, 4).endsWith("100%"));
+    }
 }

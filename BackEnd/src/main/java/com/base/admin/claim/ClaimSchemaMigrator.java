@@ -203,6 +203,18 @@ public class ClaimSchemaMigrator implements ApplicationRunner {
                 JOIN sys_menu m ON m.menu_id BETWEEN 300 AND 308
                 WHERE r.is_active = 1
                 """);
+        jdbc.execute("ALTER TABLE claim_case MODIFY similar_case_ids VARCHAR(2000) NOT NULL DEFAULT ''");
+        Integer tokenColumn = jdbc.queryForObject("""
+                SELECT COUNT(*) FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'claim_case' AND COLUMN_NAME = 'reference_token'
+                """, Integer.class);
+        if (tokenColumn == null || tokenColumn == 0) {
+            jdbc.execute("""
+                    ALTER TABLE claim_case
+                      ADD COLUMN reference_token VARCHAR(64) NOT NULL DEFAULT '',
+                      ADD COLUMN reference_view VARCHAR(4000) NOT NULL DEFAULT ''
+                    """);
+        }
         log.info("理赔档案、SOP、历史案例表与菜单已同步");
     }
 }

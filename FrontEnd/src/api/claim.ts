@@ -186,3 +186,25 @@ export async function openClaimEvidence(id: number) {
   const url = URL.createObjectURL(blob);
   window.open(url, '_blank');
 }
+
+export type ClaimRefCase = {
+  id: number;
+  score: string;
+  kind: string;
+  complaintDate?: string;
+  customerName?: string;
+  productName?: string;
+  symptomBrief?: string;
+  claimOpinion?: string;
+  judgment?: string;
+  resultText?: string;
+};
+
+export type ClaimRefPage = {
+  symptom?: string;
+  tabs: { score: string; cases: ClaimRefCase[] }[];
+};
+
+export function getClaimRefsApi(token: string) {
+  return request.get<unknown, ClaimRefPage>(`/claim/refs/${encodeURIComponent(token)}`);
+}

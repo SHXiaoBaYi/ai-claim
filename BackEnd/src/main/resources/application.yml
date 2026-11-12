@@ -54,6 +54,8 @@ xby:
     data-docs: ${CLAIM_DATA_DOCS:../data-docs}
     # 三年客诉 Excel 所在目录，首次启动导入历史案例
     history-dir: ${CLAIM_HISTORY_DIR:../docs}
+    # 钉钉里「查看历史参照案例」打开的站点根地址
+    public-base-url: ${CLAIM_PUBLIC_BASE:http://47.103.191.164}
 
 mybatis-plus:
   mapper-locations: classpath:mapper/*.xml

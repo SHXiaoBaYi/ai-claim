@@ -10,6 +10,7 @@ import java.util.regex.Pattern;
 public final class ClaimTexts {
 
     private static final Pattern PHONE = Pattern.compile("1[3-9]\\d{9}");
+    private static final Pattern LABELED_PHENOMENON = Pattern.compile("(?:服务|产品|厂库|物流|蔬菜|质量|投诉)-[^，,。；;！!？?\\n]{1,80}");
     private static final Pattern ADDRESS = Pattern.compile("[\\u4e00-\\u9fa5]{2,8}(省|自治区).{0,40}?(号|室|楼|栋|街|路|区|县|镇|园|府)");
 
     private ClaimTexts() {
@@ -201,5 +202,119 @@ public final class ClaimTexts {
         return value.contains("坏了") || value.contains("变质") || value.contains("腐烂")
                 || value.contains("烂了") || value.contains("不新鲜") || value.contains("发臭")
                 || value.contains("发黑") || value.contains("肉坏了");
+    }
+
+    /** 历史结论是无需理赔或不做处理。这类案例可以对上内容，但不能当作本次处理依据。 */
+    public static boolean noClaimOutcome(String... parts) {
+        StringBuilder text = new StringBuilder();
+        if (parts != null) {
+            for (String part : parts) {
+                text.append(empty(part));
+            }
+        }
+        String value = text.toString();
+        return value.contains("无需理赔") || value.contains("无需处理") || value.contains("不用处理")
+                || value.contains("不做处理") || value.contains("不作处理") || value.contains("不予处理")
+                || value.contains("不予理赔") || value.contains("不给予处理") || value.contains("未做处理");
+    }
+
+    /**
+     * 双向 NLI 等价度。两边都是蕴含时取较小置信度；只有一边蕴含时最高 0.89；任一边矛盾则为 0。
+     */
+    public static double bidirectionalEquivalence(String forward, double forwardProbability, String backward, double backwardProbability) {
+        String forwardLabel = nliLabel(forward);
+        String backwardLabel = nliLabel(backward);
+        if ("contradiction".equals(forwardLabel) || "contradiction".equals(backwardLabel)) {
+            return 0;
+        }
+        double forwardScore = clampProbability(forwardProbability);
+        double backwardScore = clampProbability(backwardProbability);
+        if ("entailment".equals(forwardLabel) && "entailment".equals(backwardLabel)) {
+            return Math.min(forwardScore, backwardScore);
+        }
+        if ("entailment".equals(forwardLabel) || "entailment".equals(backwardLabel)) {
+            double oneWay = "entailment".equals(forwardLabel) ? forwardScore : backwardScore;
+            return Math.min(0.89, oneWay);
+        }
+        return 0;
+    }
+
+    public static String nliLabel(String raw) {
+        String value = empty(raw).toLowerCase(java.util.Locale.ROOT);
+        if (value.contains("entail") || value.contains("蕴含") || value.equals("e")) {
+            return "entailment";
+        }
+        if (value.contains("contradict") || value.contains("矛盾") || value.equals("c")) {
+            return "contradiction";
+        }
+        return "neutral";
+    }
+
+    /** 同一条进度里使用的文本进度条，20 格。 */
+    public static String progressBar(String title, int done, int total) {
+        int safeTotal = Math.max(total, 1);
+        int safeDone = Math.max(0, Math.min(done, safeTotal));
+        int percent = (int) Math.round(safeDone * 100.0 / safeTotal);
+        int filled = percent * 20 / 100;
+        return empty(title) + "\n" + "█".repeat(filled) + "░".repeat(20 - filled) + " " + percent + "%";
+    }
+
+    /** 用户原文里的「产品-不香、不好吃」整段，顿号保留，逗号停住。 */
+    public static String labeledPhenomenon(String text) {
+        if (blank(text)) {
+            return "";
+        }
+        Matcher matcher = LABELED_PHENOMENON.matcher(text);
+        StringBuilder found = new StringBuilder();
+        while (matcher.find()) {
+            String piece = matcher.group().trim();
+            if (piece.isEmpty() || found.indexOf(piece) >= 0) {
+                continue;
+            }
+            if (!found.isEmpty()) {
+                found.append('、');
+            }
+            found.append(piece);
+        }
+        return found.toString();
+    }
+
+    /** 去掉分类前缀后现象原文相同。不香 不等于 不香、不好吃。 */
+    public static boolean samePhenomenon(String left, String right) {
+        String a = phenomenonKey(left);
+        String b = phenomenonKey(right);
+        return a.length() >= 2 && a.equals(b);
+    }
+
+    /** 投诉原文里完整出现了历史现象。短词不靠包含关系算等价。 */
+    public static boolean containsPhenomenon(String complaint, String phenomenon) {
+        String key = phenomenonKey(phenomenon);
+        if (key.length() < 4) {
+            return false;
+        }
+        String haystack = empty(complaint).replaceAll("\\s+", "");
+        return haystack.contains(key);
+    }
+
+    private static String phenomenonKey(String text) {
+        String value = empty(text).replaceAll("\\s+", "");
+        int dash = value.indexOf('-');
+        if (dash > 0 && dash <= 4 && dash < value.length() - 1) {
+            String prefix = value.substring(0, dash);
+            if (prefix.matches("服务|产品|厂库|物流|蔬菜|质量|投诉")) {
+                value = value.substring(dash + 1);
+            }
+        }
+        return value;
+    }
+
+    private static double clampProbability(double value) {
+        if (Double.isNaN(value) || value < 0) {
+            return 0;
+        }
+        if (value > 1 && value <= 100) {
+            value = value / 100.0;
+        }
+        return Math.min(1, value);
     }
 }

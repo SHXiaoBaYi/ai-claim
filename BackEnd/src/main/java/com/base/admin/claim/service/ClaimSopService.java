@@ -118,6 +118,19 @@ public class ClaimSopService {
         }
     }
 
+    /** 已有流程时补上后来新增的节点，不覆盖已经改过的文案。 */
+    @Transactional
+    public void ensureCatalogNodes() {
+        java.util.Set<String> existing = all().stream()
+                .map(ClaimSopNode::getNodeCode)
+                .collect(java.util.stream.Collectors.toSet());
+        for (ClaimSopNode node : ClaimSopCatalog.nodes()) {
+            if (!existing.contains(node.getNodeCode())) {
+                sopNodeMapper.insert(node);
+            }
+        }
+    }
+
     public ClaimSopNode matchSymptom(String blob) {
         String text = ClaimTexts.empty(blob);
         boolean meat = ClaimTexts.meatText(text);
@@ -188,6 +201,9 @@ public class ClaimSopService {
         String demand = ClaimTexts.empty(claim.getCustomerDemand());
         String consume = ClaimTexts.empty(claim.getConsumeSummary());
         String symptomText = ClaimTexts.empty(claim.getSymptom());
+        if (code.startsWith("service.short")) {
+            return byCode(actions, "service.short.verify");
+        }
         if (code.startsWith("product.foreign")) {
             if (containsAny(demand, "索赔", "赔偿", "十倍")) {
                 return byCode(actions, "product.foreign.claim");
