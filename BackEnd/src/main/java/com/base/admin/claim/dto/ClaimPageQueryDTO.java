@@ -22,7 +22,7 @@ public class ClaimPageQueryDTO extends PageQuery {
     @Schema(description = "档案状态")
     private String status;
 
-    @Schema(description = "关键词，匹配姓名、电话、产品、现象、投诉内容")
+    @Schema(description = "关键词，匹配姓名、电话、产品、现象、现象大类、投诉内容")
     private String keyword;
 
     @Schema(description = "来源年份")

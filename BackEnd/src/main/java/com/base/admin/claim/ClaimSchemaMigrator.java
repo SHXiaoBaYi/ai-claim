@@ -74,6 +74,7 @@ public class ClaimSchemaMigrator implements ApplicationRunner {
                   customer_type        VARCHAR(32)   NOT NULL DEFAULT '',
                   consume_summary      VARCHAR(1000) NOT NULL DEFAULT '',
                   product_category     VARCHAR(128)  NOT NULL DEFAULT '',
+                  product_group        VARCHAR(16)   NOT NULL DEFAULT '',
                   product_name         VARCHAR(500)  NOT NULL DEFAULT '',
                   product_spec         VARCHAR(255)  NOT NULL DEFAULT '',
                   store_name           VARCHAR(255)  NOT NULL DEFAULT '',
@@ -82,6 +83,7 @@ public class ClaimSchemaMigrator implements ApplicationRunner {
                   logistics_no         VARCHAR(128)  NOT NULL DEFAULT '',
                   logistics_summary    VARCHAR(1000) NOT NULL DEFAULT '',
                   symptom              VARCHAR(500)  NOT NULL DEFAULT '',
+                  symptom_category     VARCHAR(32)   NOT NULL DEFAULT '',
                   symptom_code         VARCHAR(64)   NOT NULL DEFAULT '',
                   cooking_method       VARCHAR(500)  NOT NULL DEFAULT '',
                   customer_demand      VARCHAR(500)  NOT NULL DEFAULT '',
@@ -149,8 +151,10 @@ public class ClaimSchemaMigrator implements ApplicationRunner {
                   customer_address   VARCHAR(255)  NOT NULL DEFAULT '',
                   complaint_content  TEXT,
                   product_category   VARCHAR(64)   NOT NULL DEFAULT '',
+                  product_group      VARCHAR(16)   NOT NULL DEFAULT '',
                   product_name       VARCHAR(255)  NOT NULL DEFAULT '',
                   symptom_brief      VARCHAR(255)  NOT NULL DEFAULT '',
+                  symptom_category   VARCHAR(32)   NOT NULL DEFAULT '',
                   claim_opinion      TEXT,
                   claim_product      VARCHAR(500)  NOT NULL DEFAULT '',
                   judgment           VARCHAR(64)   NOT NULL DEFAULT '',
@@ -215,6 +219,67 @@ public class ClaimSchemaMigrator implements ApplicationRunner {
                       ADD COLUMN reference_view VARCHAR(4000) NOT NULL DEFAULT ''
                     """);
         }
+        addColumnIfMissing("claim_case", "symptom_category",
+                "ALTER TABLE claim_case ADD COLUMN symptom_category VARCHAR(32) NOT NULL DEFAULT '' AFTER symptom");
+        addColumnIfMissing("claim_history_case", "symptom_category",
+                "ALTER TABLE claim_history_case ADD COLUMN symptom_category VARCHAR(32) NOT NULL DEFAULT '' AFTER symptom_brief");
+        addIndexIfMissing("claim_case", "idx_claim_case_symptom",
+                "ALTER TABLE claim_case ADD INDEX idx_claim_case_symptom (symptom_category)");
+        addIndexIfMissing("claim_history_case", "idx_claim_history_symptom",
+                "ALTER TABLE claim_history_case ADD INDEX idx_claim_history_symptom (symptom_category)");
+        addColumnIfMissing("claim_case", "product_group",
+                "ALTER TABLE claim_case ADD COLUMN product_group VARCHAR(16) NOT NULL DEFAULT '' AFTER product_category");
+        addColumnIfMissing("claim_history_case", "product_group",
+                "ALTER TABLE claim_history_case ADD COLUMN product_group VARCHAR(16) NOT NULL DEFAULT '' AFTER product_category");
+        addIndexIfMissing("claim_case", "idx_claim_case_symptom_product",
+                "ALTER TABLE claim_case ADD INDEX idx_claim_case_symptom_product (symptom_category, product_group)");
+        addIndexIfMissing("claim_history_case", "idx_claim_history_symptom_product",
+                "ALTER TABLE claim_history_case ADD INDEX idx_claim_history_symptom_product (symptom_category, product_group)");
+        jdbc.execute("ALTER TABLE claim_case MODIFY reference_view TEXT");
+        addColumnIfMissing("claim_case", "advice_decision",
+                "ALTER TABLE claim_case ADD COLUMN advice_decision VARCHAR(16) NOT NULL DEFAULT '' AFTER recommendation");
+        addColumnIfMissing("claim_case", "session_webhook",
+                "ALTER TABLE claim_case ADD COLUMN session_webhook VARCHAR(1000) NOT NULL DEFAULT '' AFTER reference_view");
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS claim_advice_decision (
+                  id                BIGINT       NOT NULL AUTO_INCREMENT,
+                  case_id           BIGINT       NOT NULL,
+                  decision          VARCHAR(16)  NOT NULL,
+                  original_advice   TEXT,
+                  final_advice      TEXT,
+                  symptom_category  VARCHAR(32)  NOT NULL DEFAULT '',
+                  product_group     VARCHAR(16)  NOT NULL DEFAULT '',
+                  decider_name      VARCHAR(64)  NOT NULL DEFAULT '',
+                  create_by         VARCHAR(50)  DEFAULT '',
+                  create_time       DATETIME     DEFAULT CURRENT_TIMESTAMP,
+                  update_by         VARCHAR(50)  DEFAULT '',
+                  update_time       DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                  is_active         TINYINT      NOT NULL DEFAULT 1,
+                  PRIMARY KEY (id),
+                  KEY idx_claim_advice_case (case_id),
+                  KEY idx_claim_advice_scope (symptom_category, product_group, decision)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='综合建议人工处理'
+                """);
         log.info("理赔档案、SOP、历史案例表与菜单已同步");
+    }
+
+    private void addColumnIfMissing(String table, String column, String ddl) {
+        Integer count = jdbc.queryForObject("""
+                SELECT COUNT(*) FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?
+                """, Integer.class, table, column);
+        if (count == null || count == 0) {
+            jdbc.execute(ddl);
+        }
+    }
+
+    private void addIndexIfMissing(String table, String index, String ddl) {
+        Integer count = jdbc.queryForObject("""
+                SELECT COUNT(*) FROM information_schema.STATISTICS
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?
+                """, Integer.class, table, index);
+        if (count == null || count == 0) {
+            jdbc.execute(ddl);
+        }
     }
 }

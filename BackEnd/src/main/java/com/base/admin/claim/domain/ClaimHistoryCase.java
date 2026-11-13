@@ -57,11 +57,17 @@ public class ClaimHistoryCase extends BaseEntity {
     @Schema(description = "产品分类")
     private String productCategory;
 
+    @Schema(description = "产品分组，如羊肉、牛肉、蔬菜")
+    private String productGroup;
+
     @Schema(description = "产品名称")
     private String productName;
 
     @Schema(description = "投诉简述")
     private String symptomBrief;
+
+    @Schema(description = "投诉现象大类，如口感老柴、轻微开化")
+    private String symptomCategory;
 
     @Schema(description = "理赔意见")
     private String claimOpinion;

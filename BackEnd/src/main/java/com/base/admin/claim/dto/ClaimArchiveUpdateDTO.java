@@ -33,6 +33,9 @@ public class ClaimArchiveUpdateDTO {
     @Schema(description = "产品分类")
     private String productCategory;
 
+    @Schema(description = "产品分组")
+    private String productGroup;
+
     @Schema(description = "产品名称")
     private String productName;
 
@@ -56,6 +59,9 @@ public class ClaimArchiveUpdateDTO {
 
     @Schema(description = "投诉现象")
     private String symptom;
+
+    @Schema(description = "投诉现象大类")
+    private String symptomCategory;
 
     @Schema(description = "烹饪或解冻方式")
     private String cookingMethod;

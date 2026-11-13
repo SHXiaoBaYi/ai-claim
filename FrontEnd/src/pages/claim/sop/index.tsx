@@ -61,35 +61,37 @@ const ClaimSopPage = memo(function ClaimSopPage() {
     { title: '规则', dataIndex: 'content', search: false, ellipsis: true },
     {
       title: '操作',
-      valueType: 'option',
-      width: 180,
-      render: (_, row) => [
-        <Button
-          key='edit'
-          type='link'
-          className='px-0'
-          onClick={() => edit(row)}
-        >
-          编辑
-        </Button>,
-        <Button
-          key='add'
-          type='link'
-          className='px-0'
-          onClick={() => edit(undefined, row.nodeCode)}
-        >
-          加下级
-        </Button>,
-        <Button
-          key='del'
-          type='link'
-          danger
-          className='px-0'
-          onClick={() => remove(row)}
-        >
-          删除
-        </Button>,
-      ],
+      width: 148,
+      search: false,
+      render: (_, row) => (
+        <div className='flex items-center gap-1 whitespace-nowrap'>
+          <Button
+            type='link'
+            className='h-auto px-0 py-0'
+            style={{ height: 'auto', padding: 0 }}
+            onClick={() => edit(row)}
+          >
+            编辑
+          </Button>
+          <Button
+            type='link'
+            className='h-auto px-0 py-0'
+            style={{ height: 'auto', padding: 0 }}
+            onClick={() => edit(undefined, row.nodeCode)}
+          >
+            加下级
+          </Button>
+          <Button
+            type='link'
+            danger
+            className='h-auto px-0 py-0'
+            style={{ height: 'auto', padding: 0 }}
+            onClick={() => remove(row)}
+          >
+            删除
+          </Button>
+        </div>
+      ),
     },
   ];
 
@@ -101,6 +103,7 @@ const ClaimSopPage = memo(function ClaimSopPage() {
         rowKey='id'
         search={false}
         pagination={false}
+        pinActionColumn={false}
         columns={columns}
         request={async () => {
           const data = await getClaimSopTreeApi();

@@ -308,6 +308,11 @@ public final class ClaimTexts {
         return value;
     }
 
+    /** 综合建议固定三段，卡片、落库和人工修改都用这一份。 */
+    public static String advice(String nature, String actions, String plan) {
+        return "综合建议：\n1. 事件定性：" + empty(nature) + "\n2. 行动要素：" + empty(actions) + "\n3. 具体方案：" + empty(plan);
+    }
+
     private static double clampProbability(double value) {
         if (Double.isNaN(value) || value < 0) {
             return 0;

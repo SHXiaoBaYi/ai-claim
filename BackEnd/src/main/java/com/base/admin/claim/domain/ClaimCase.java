@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.base.admin.common.BaseEntity;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
@@ -55,6 +56,9 @@ public class ClaimCase extends BaseEntity {
     @Schema(description = "产品分类")
     private String productCategory;
 
+    @Schema(description = "产品分组，如羊肉、牛肉、蔬菜")
+    private String productGroup;
+
     @Schema(description = "产品名称")
     private String productName;
 
@@ -79,6 +83,9 @@ public class ClaimCase extends BaseEntity {
     @Schema(description = "投诉现象")
     private String symptom;
 
+    @Schema(description = "投诉现象大类，如口感老柴、轻微开化")
+    private String symptomCategory;
+
     @Schema(description = "命中的 SOP 现象编码")
     private String symptomCode;
 
@@ -99,6 +106,13 @@ public class ClaimCase extends BaseEntity {
 
     @Schema(description = "理赔建议")
     private String recommendation;
+
+    @Schema(description = "最近一次建议处理：ADOPTED 完全采纳 / REDO 不满意重出 / PARTIAL 部分采纳")
+    private String adviceDecision;
+
+    @JsonIgnore
+    @Schema(hidden = true, description = "钉钉会话 webhook，只用于把重出的建议推回原会话")
+    private String sessionWebhook;
 
     @Schema(description = "建议依据")
     private String recommendationBasis;

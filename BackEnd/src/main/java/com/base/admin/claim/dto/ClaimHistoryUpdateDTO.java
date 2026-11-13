@@ -39,11 +39,17 @@ public class ClaimHistoryUpdateDTO {
     @Schema(description = "产品分类")
     private String productCategory;
 
+    @Schema(description = "产品分组")
+    private String productGroup;
+
     @Schema(description = "产品名称")
     private String productName;
 
     @Schema(description = "投诉简述")
     private String symptomBrief;
+
+    @Schema(description = "投诉现象大类")
+    private String symptomCategory;
 
     @Schema(description = "理赔意见")
     private String claimOpinion;

@@ -59,12 +59,13 @@ function withDateTimeFormat<T extends Record<string, any>>(columns?: ProColumns<
  * 扩展ProTable，添加一些公共默认属性。
  * 对于对象类型的属性（scroll、pagination、search），会与调用方传入的值进行浅合并，
  * 确保默认子属性不会因调用方传入部分属性而丢失。
- * 操作列（valueType=option / 标题「操作」）会自动移到第一列并 left 固定。
+ * 操作列（valueType=option / 标题「操作」）默认移到第一列并 left 固定。树表可传 pinActionColumn={false}，避免缩进把按钮挤到标题上。
  */
 export default function BaseProTable<T extends Record<string, any>, U extends ParamsType = any>(
-  props: ProTableProps<T, U>,
+  props: ProTableProps<T, U> & { pinActionColumn?: boolean },
 ) {
   const {
+    pinActionColumn = true,
     scroll: callerScroll,
     pagination: callerPagination,
     className: callerClassName,
@@ -91,10 +92,10 @@ export default function BaseProTable<T extends Record<string, any>, U extends Pa
   })();
 
   const className = [styles.table, callerClassName].filter(Boolean).join(' ');
-  const mergedColumns = useMemo(
-    () => withActionColumnFirst(withDateTimeFormat(columns as ProColumns<T>[] | undefined)),
-    [columns],
-  );
+  const mergedColumns = useMemo(() => {
+    const formatted = withDateTimeFormat(columns as ProColumns<T>[] | undefined);
+    return pinActionColumn ? withActionColumnFirst(formatted) : formatted;
+  }, [columns, pinActionColumn]);
 
   return (
     <ProTable<T, U>

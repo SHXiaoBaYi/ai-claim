@@ -10,6 +10,8 @@ import com.base.admin.claim.dto.ClaimPageQueryDTO;
 import com.base.admin.claim.mapper.ClaimHistoryCaseMapper;
 import com.base.admin.claim.support.ClaimHistoryExcel;
 import com.base.admin.claim.support.ClaimHistoryExcel.SheetTable;
+import com.base.admin.claim.support.ClaimProductGroup;
+import com.base.admin.claim.support.ClaimSymptomCategory;
 import com.base.admin.claim.support.ClaimTexts;
 import com.base.admin.common.PageResult;
 import com.base.admin.exception.BusinessException;
@@ -43,6 +45,8 @@ public class ClaimHistoryService {
                         .or().like(ClaimHistoryCase::getCustomerPhone, query.getKeyword())
                         .or().like(ClaimHistoryCase::getProductName, query.getKeyword())
                         .or().like(ClaimHistoryCase::getSymptomBrief, query.getKeyword())
+                        .or().like(ClaimHistoryCase::getSymptomCategory, query.getKeyword())
+                        .or().like(ClaimHistoryCase::getProductGroup, query.getKeyword())
                         .or().like(ClaimHistoryCase::getComplaintContent, query.getKeyword()))
                 .orderByDesc(ClaimHistoryCase::getComplaintDate)
                 .orderByDesc(ClaimHistoryCase::getId);
@@ -61,6 +65,13 @@ public class ClaimHistoryService {
 
     public void update(ClaimHistoryUpdateDTO dto) {
         ClaimHistoryCase row = get(dto.getId());
+        boolean textChanged = changed(row.getSymptomBrief(), dto.getSymptomBrief())
+                || changed(row.getProductName(), dto.getProductName())
+                || changed(row.getProductCategory(), dto.getProductCategory())
+                || changed(row.getComplaintType(), dto.getComplaintType())
+                || changed(row.getComplaintContent(), dto.getComplaintContent());
+        String previousCategory = row.getSymptomCategory();
+        String previousGroup = row.getProductGroup();
         row.setComplaintDate(ClaimTexts.empty(dto.getComplaintDate()));
         row.setPurchaseDate(ClaimTexts.empty(dto.getPurchaseDate()));
         row.setComplaintType(ClaimTexts.empty(dto.getComplaintType()));
@@ -70,8 +81,13 @@ public class ClaimHistoryService {
         row.setCustomerAddress(ClaimTexts.empty(dto.getCustomerAddress()));
         row.setComplaintContent(ClaimTexts.empty(dto.getComplaintContent()));
         row.setProductCategory(ClaimTexts.empty(dto.getProductCategory()));
+        row.setProductGroup(ClaimSymptomCategory.choose(dto.getProductGroup(), previousGroup, textChanged,
+                ClaimProductGroup.of(dto.getProductName(), dto.getProductCategory(), dto.getSymptomBrief())));
         row.setProductName(ClaimTexts.empty(dto.getProductName()));
         row.setSymptomBrief(ClaimTexts.empty(dto.getSymptomBrief()));
+        row.setSymptomCategory(ClaimSymptomCategory.choose(dto.getSymptomCategory(), previousCategory, textChanged,
+                ClaimSymptomCategory.classify(dto.getSymptomBrief(), dto.getProductName(), dto.getProductCategory(),
+                        dto.getComplaintType(), dto.getComplaintContent())));
         row.setClaimOpinion(ClaimTexts.empty(dto.getClaimOpinion()));
         row.setClaimProduct(ClaimTexts.empty(dto.getClaimProduct()));
         row.setJudgment(ClaimTexts.empty(dto.getJudgment()));
@@ -176,8 +192,11 @@ public class ClaimHistoryService {
         target.setCustomerAddress(ClaimTexts.addressOf(content));
         target.setComplaintContent(content);
         target.setProductCategory(ClaimTexts.clip(ClaimHistoryExcel.text(row, "产品分类"), 64));
+        target.setProductGroup(ClaimProductGroup.of(product, target.getProductCategory(), brief));
         target.setProductName(ClaimTexts.clip(product, 255));
         target.setSymptomBrief(ClaimTexts.clip(brief, 255));
+        target.setSymptomCategory(ClaimSymptomCategory.classify(brief, product, target.getProductCategory(),
+                target.getComplaintType(), content));
         target.setClaimOpinion(ClaimHistoryExcel.text(row, "理赔意见"));
         target.setClaimProduct(ClaimTexts.clip(ClaimHistoryExcel.text(row, "理赔产品"), 500));
         target.setJudgment(ClaimTexts.clip(ClaimHistoryExcel.text(row, "初步判定"), 64));
@@ -199,6 +218,39 @@ public class ClaimHistoryService {
             historyMapper.updateById(target);
             result.setUpdated(result.getUpdated() + 1);
         }
+    }
+
+    /** 只补空着的现象大类和产品分组，已经有值的保留。 */
+    public void fillSymptomCategories() {
+        List<ClaimHistoryCase> rows = historyMapper.selectList(new LambdaQueryWrapper<ClaimHistoryCase>()
+                .and(wrapper -> wrapper.isNull(ClaimHistoryCase::getSymptomCategory)
+                        .or().eq(ClaimHistoryCase::getSymptomCategory, "")
+                        .or().isNull(ClaimHistoryCase::getProductGroup)
+                        .or().eq(ClaimHistoryCase::getProductGroup, "")));
+        int updated = 0;
+        for (ClaimHistoryCase row : rows) {
+            boolean changed = false;
+            if (ClaimTexts.blank(row.getSymptomCategory())) {
+                row.setSymptomCategory(ClaimSymptomCategory.classify(row.getSymptomBrief(), row.getProductName(),
+                        row.getProductCategory(), row.getComplaintType(), row.getComplaintContent()));
+                changed = true;
+            }
+            if (ClaimTexts.blank(row.getProductGroup())) {
+                row.setProductGroup(ClaimProductGroup.of(row.getProductName(), row.getProductCategory(), row.getSymptomBrief()));
+                changed = true;
+            }
+            if (changed) {
+                historyMapper.updateById(row);
+                updated++;
+            }
+        }
+        if (updated > 0) {
+            log.info("已补历史案例现象大类和产品分组 {} 条", updated);
+        }
+    }
+
+    private boolean changed(String previous, String submitted) {
+        return !ClaimTexts.empty(previous).equals(ClaimTexts.empty(submitted));
     }
 
     private String dedupe(String year, String date, String phone, String name, String product, String brief) {

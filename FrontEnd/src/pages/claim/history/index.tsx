@@ -1,9 +1,10 @@
 import { memo, useRef, useState } from 'react';
 import type { ActionType, ProColumnType } from '@ant-design/pro-components';
-import { App, Button, Form, Input, Modal } from 'antd';
+import { App, Button, Form, Input, Modal, Select } from 'antd';
 import BaseProTable from '@/components/BaseProTable';
 import { getClaimHistoryListApi, importClaimHistoryApi, updateClaimHistoryApi, type ClaimHistory } from '@/api/claim';
 import tools from '@/utils/tools';
+import { PRODUCT_GROUPS, SYMPTOM_CATEGORIES } from '@/pages/claim/symptomCategories';
 
 const ClaimHistoryPage = memo(function ClaimHistoryPage() {
   const { message } = App.useApp();
@@ -43,7 +44,9 @@ const ClaimHistoryPage = memo(function ClaimHistoryPage() {
     { title: '顾客', dataIndex: 'customerName', width: 120, search: false },
     { title: '电话', dataIndex: 'customerPhone', width: 140, search: false },
     { title: '产品', dataIndex: 'productName', ellipsis: true, search: false },
+    { title: '产品分组', dataIndex: 'productGroup', width: 100, search: false },
     { title: '现象', dataIndex: 'symptomBrief', ellipsis: true, search: false },
+    { title: '现象大类', dataIndex: 'symptomCategory', width: 120, search: false },
     { title: '判定', dataIndex: 'judgment', width: 120, search: false },
     {
       title: '关键词',
@@ -91,7 +94,9 @@ const ClaimHistoryPage = memo(function ClaimHistoryPage() {
           </Button>,
         ]}
         tableExtraRender={() => (
-          <div className='mb-3 text-sm text-neutral-500'>三年客诉作为建议依据。手工改过的案例，重新导入时会保留。</div>
+          <div className='mb-3 text-sm text-neutral-500'>
+            三年客诉作为建议依据。出建议时先按现象大类缩小范围，再对照这一类的案例和档案。手工改过的案例，重新导入时会保留。
+          </div>
         )}
       />
       <Modal
@@ -163,6 +168,15 @@ const ClaimHistoryPage = memo(function ClaimHistoryPage() {
               <Input />
             </Form.Item>
             <Form.Item
+              name='productGroup'
+              label='产品分组'
+            >
+              <Select
+                showSearch
+                options={PRODUCT_GROUPS.map((item) => ({ value: item, label: item }))}
+              />
+            </Form.Item>
+            <Form.Item
               name='judgment'
               label='初步判定'
             >
@@ -186,6 +200,15 @@ const ClaimHistoryPage = memo(function ClaimHistoryPage() {
             label='投诉简述'
           >
             <Input />
+          </Form.Item>
+          <Form.Item
+            name='symptomCategory'
+            label='现象大类'
+          >
+            <Select
+              showSearch
+              options={SYMPTOM_CATEGORIES.map((item) => ({ value: item, label: item }))}
+            />
           </Form.Item>
           <Form.Item
             name='claimProduct'

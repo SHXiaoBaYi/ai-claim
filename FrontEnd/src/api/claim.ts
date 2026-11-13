@@ -16,6 +16,7 @@ export type ClaimCase = {
   customerType?: string;
   consumeSummary?: string;
   productCategory?: string;
+  productGroup?: string;
   productName?: string;
   productSpec?: string;
   storeName?: string;
@@ -24,6 +25,7 @@ export type ClaimCase = {
   logisticsNo?: string;
   logisticsSummary?: string;
   symptom?: string;
+  symptomCategory?: string;
   symptomCode?: string;
   cookingMethod?: string;
   customerDemand?: string;
@@ -63,8 +65,10 @@ export type ClaimHistory = {
   customerAddress?: string;
   complaintContent?: string;
   productCategory?: string;
+  productGroup?: string;
   productName?: string;
   symptomBrief?: string;
+  symptomCategory?: string;
   claimOpinion?: string;
   claimProduct?: string;
   judgment?: string;
@@ -84,6 +88,18 @@ export type ClaimArchiveDetail = {
   messages: ClaimMessage[];
   evidences: ClaimEvidence[];
   similarCases: ClaimHistory[];
+  decisions?: ClaimAdviceDecision[];
+};
+
+export type ClaimAdviceDecision = {
+  id: number;
+  decision?: string;
+  originalAdvice?: string;
+  finalAdvice?: string;
+  deciderName?: string;
+  symptomCategory?: string;
+  productGroup?: string;
+  createTime?: string;
 };
 
 export type ClaimSopNode = {
@@ -191,6 +207,7 @@ export type ClaimRefCase = {
   id: number;
   score: string;
   kind: string;
+  source?: string;
   complaintDate?: string;
   customerName?: string;
   productName?: string;
@@ -202,9 +219,38 @@ export type ClaimRefCase = {
 
 export type ClaimRefPage = {
   symptom?: string;
+  symptomCategory?: string;
+  productGroup?: string;
   tabs: { score: string; cases: ClaimRefCase[] }[];
 };
 
 export function getClaimRefsApi(token: string) {
   return request.get<unknown, ClaimRefPage>(`/claim/refs/${encodeURIComponent(token)}`);
+}
+
+export type ClaimAdvicePage = {
+  customerName?: string;
+  productName?: string;
+  symptom?: string;
+  symptomCategory?: string;
+  productGroup?: string;
+  recommendation?: string;
+  decision?: string;
+  hasRefs?: boolean;
+};
+
+export function getClaimAdviceApi(token: string) {
+  return request.get<unknown, ClaimAdvicePage>(`/claim/advice/${encodeURIComponent(token)}`);
+}
+
+export function adoptClaimAdviceApi(token: string) {
+  return request.post<unknown, ClaimAdvicePage>(`/claim/advice/${encodeURIComponent(token)}/adopt`);
+}
+
+export function redoClaimAdviceApi(token: string) {
+  return request.post<unknown, ClaimAdvicePage>(`/claim/advice/${encodeURIComponent(token)}/redo`);
+}
+
+export function editClaimAdviceApi(token: string, data: { nature: string; actions: string; plan: string }) {
+  return request.post<unknown, ClaimAdvicePage>(`/claim/advice/${encodeURIComponent(token)}/partial`, data);
 }

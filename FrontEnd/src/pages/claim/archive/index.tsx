@@ -1,6 +1,6 @@
 import { memo, useRef, useState } from 'react';
 import type { ActionType, ProColumnType } from '@ant-design/pro-components';
-import { App, Button, Descriptions, Drawer, Form, Input, Popconfirm, Space, Tag } from 'antd';
+import { App, Button, Descriptions, Drawer, Form, Input, Popconfirm, Select, Space, Tag } from 'antd';
 import BaseProTable from '@/components/BaseProTable';
 import {
   deleteClaimArchiveApi,
@@ -10,8 +10,10 @@ import {
   recommendClaimArchiveApi,
   updateClaimArchiveApi,
   type ClaimArchiveDetail,
+  type ClaimAdviceDecision,
   type ClaimCase,
 } from '@/api/claim';
+import { PRODUCT_GROUPS, SYMPTOM_CATEGORIES } from '@/pages/claim/symptomCategories';
 import tools from '@/utils/tools';
 
 const STATUS: Record<string, { text: string; color: string }> = {
@@ -19,6 +21,12 @@ const STATUS: Record<string, { text: string; color: string }> = {
   RECOMMENDED: { text: '已出建议', color: 'success' },
   INTERRUPTED: { text: '已中断', color: 'default' },
 };
+
+function decisionText(row: ClaimAdviceDecision) {
+  if (row.decision === 'ADOPTED') return '完全采纳';
+  if (row.decision === 'REDO') return '不满意重出';
+  return '部分采纳';
+}
 
 const ClaimArchivePage = memo(function ClaimArchivePage() {
   const { message } = App.useApp();
@@ -96,7 +104,9 @@ const ClaimArchivePage = memo(function ClaimArchivePage() {
     { title: '电话', dataIndex: 'customerPhone', width: 140 },
     { title: '门店', dataIndex: 'storeName', search: false, width: 140, ellipsis: true },
     { title: '产品', dataIndex: 'productName', ellipsis: true },
+    { title: '产品分组', dataIndex: 'productGroup', width: 100, search: false },
     { title: '现象', dataIndex: 'symptom', search: false, ellipsis: true },
+    { title: '现象大类', dataIndex: 'symptomCategory', width: 120, search: false },
     { title: '发起人', dataIndex: 'senderName', search: false, width: 120 },
     { title: '更新时间', dataIndex: 'updateTime', valueType: 'dateTime', search: false, width: 170 },
     {
@@ -145,7 +155,7 @@ const ClaimArchivePage = memo(function ClaimArchivePage() {
         }}
         tableExtraRender={() => (
           <div className='mb-3 text-sm text-neutral-500'>
-            投诉只在钉钉单聊里收集。这里查看和修改已经落库的用户、消费、产品和建议。
+            投诉只在钉钉单聊里收集。每张档案会记下现象大类和产品分组，后面出建议时按这个范围积累对照。
           </div>
         )}
       />
@@ -235,6 +245,15 @@ const ClaimArchivePage = memo(function ClaimArchivePage() {
               <Input />
             </Form.Item>
             <Form.Item
+              name='productGroup'
+              label='产品分组'
+            >
+              <Select
+                showSearch
+                options={PRODUCT_GROUPS.map((item) => ({ value: item, label: item }))}
+              />
+            </Form.Item>
+            <Form.Item
               name='productSpec'
               label='规格'
             >
@@ -272,6 +291,15 @@ const ClaimArchivePage = memo(function ClaimArchivePage() {
             <Input.TextArea rows={2} />
           </Form.Item>
           <Form.Item
+            name='symptomCategory'
+            label='现象大类'
+          >
+            <Select
+              showSearch
+              options={SYMPTOM_CATEGORIES.map((item) => ({ value: item, label: item }))}
+            />
+          </Form.Item>
+          <Form.Item
             name='cookingMethod'
             label='烹饪 / 解冻'
           >
@@ -302,6 +330,29 @@ const ClaimArchivePage = memo(function ClaimArchivePage() {
             <Input.TextArea rows={6} />
           </Form.Item>
         </Form>
+        {(detail?.decisions || []).length > 0 ? (
+          <div className='mt-4'>
+            <div className='text-sm font-medium'>建议处理记录</div>
+            <div className='mt-2 space-y-2'>
+              {(detail?.decisions || []).map((row) => (
+                <div
+                  key={row.id}
+                  className='rounded border border-neutral-200 px-3 py-2 text-sm'
+                >
+                  <div className='flex items-center gap-2'>
+                    <Tag color={row.decision === 'REDO' ? 'gold' : 'green'}>{decisionText(row)}</Tag>
+                    <span className='text-neutral-500'>
+                      {row.deciderName || '人工'} {row.createTime || ''}
+                    </span>
+                  </div>
+                  <div className='mt-1 whitespace-pre-wrap text-neutral-700'>
+                    {row.decision === 'REDO' ? row.originalAdvice : row.finalAdvice}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
         <Descriptions
           title='证据'
           column={1}

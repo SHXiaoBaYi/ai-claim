@@ -1,16 +1,20 @@
 package com.base.admin.claim.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.base.admin.claim.domain.ClaimAdviceDecision;
 import com.base.admin.claim.domain.ClaimCase;
 import com.base.admin.claim.domain.ClaimEvidence;
 import com.base.admin.claim.domain.ClaimHistoryCase;
 import com.base.admin.claim.domain.ClaimMessage;
 import com.base.admin.claim.domain.ClaimSopNode;
+import com.base.admin.claim.mapper.ClaimAdviceDecisionMapper;
 import com.base.admin.claim.mapper.ClaimCaseMapper;
 import com.base.admin.claim.mapper.ClaimEvidenceMapper;
 import com.base.admin.claim.mapper.ClaimHistoryCaseMapper;
 import com.base.admin.claim.mapper.ClaimMessageMapper;
 import com.base.admin.claim.ClaimProperties;
+import com.base.admin.claim.support.ClaimProductGroup;
+import com.base.admin.claim.support.ClaimSymptomCategory;
 import com.base.admin.claim.support.ClaimTexts;
 import com.base.admin.service.AiChatService;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -39,6 +43,7 @@ import java.util.regex.Pattern;
 public class ClaimConversationService {
 
     private final ClaimCaseMapper caseMapper;
+    private final ClaimAdviceDecisionMapper decisionMapper;
     private final ClaimMessageMapper messageMapper;
     private final ClaimEvidenceMapper evidenceMapper;
     private final ClaimHistoryCaseMapper historyMapper;
@@ -48,7 +53,7 @@ public class ClaimConversationService {
     private final ClaimProperties claimProperties;
     private final AiChatService aiChatService;
     private final ObjectMapper objectMapper;
-    private final ThreadLocal<ClaimAction> pendingAction = new ThreadLocal<>();
+    private final ThreadLocal<List<ClaimAction>> pendingActions = new ThreadLocal<>();
 
     public interface ClaimPace {
         void startWaiting();
@@ -64,19 +69,20 @@ public class ClaimConversationService {
         private long id;
         private double score;
         private String kind;
+        private String source;
     }
 
-    public ClaimAction takeAction() {
-        ClaimAction action = pendingAction.get();
-        pendingAction.remove();
-        return action;
+    public List<ClaimAction> takeActions() {
+        List<ClaimAction> actions = pendingActions.get();
+        pendingActions.remove();
+        return actions == null ? List.of() : actions;
     }
 
     public record ClaimFile(String kind, String fileName, byte[] bytes, String error) {
     }
 
     public record ClaimInbound(String conversationId, String conversationType, String senderId, String senderName,
-                               String text, String msgType, List<ClaimFile> files) {
+                               String text, String msgType, List<ClaimFile> files, String sessionWebhook) {
     }
 
     @Transactional
@@ -86,7 +92,7 @@ public class ClaimConversationService {
 
     @Transactional
     public String handle(ClaimInbound inbound, ClaimPace pace) {
-        pendingAction.remove();
+        pendingActions.remove();
         if ("2".equals(inbound.conversationType())) {
             return "请在和理赔机器人的单聊里发送投诉，不要发在群里。";
         }
@@ -98,7 +104,7 @@ public class ClaimConversationService {
             try {
                 return handleLocked(inbound, conversationId, pace);
             } catch (RuntimeException ex) {
-                pendingAction.remove();
+                pendingActions.remove();
                 throw ex;
             }
         }
@@ -111,7 +117,7 @@ public class ClaimConversationService {
             return null;
         }
         String reply = finish(claim, null);
-        pendingAction.remove();
+        pendingActions.remove();
         saveMessage(claim.getId(), "bot", "text", reply);
         return caseMapper.selectById(caseId);
     }
@@ -144,8 +150,12 @@ public class ClaimConversationService {
         if (!ClaimTexts.blank(inbound.senderName())) {
             claim.setSenderName(inbound.senderName());
         }
+        if (!ClaimTexts.blank(inbound.sessionWebhook())) {
+            claim.setSessionWebhook(ClaimTexts.clip(inbound.sessionWebhook(), 1000));
+        }
         applyFacts(claim, userText, !saved.isEmpty());
         fillCategory(claim);
+        rememberClassification(claim);
         if (created && saved.isEmpty() && !hasClaimFact(claim)) {
             discard(claim.getId());
             return openingScript();
@@ -174,6 +184,7 @@ public class ClaimConversationService {
             saveMessage(claim.getId(), "user", inbound.msgType() == null ? "text" : inbound.msgType(), text);
         }
         saveFiles(claim.getId(), inbound.files());
+        rememberClassification(claim);
         claim.setStatus(ClaimCase.INTERRUPTED);
         claim.setPendingSlot("");
         caseMapper.updateById(claim);
@@ -276,6 +287,8 @@ public class ClaimConversationService {
         claim.setSimilarCaseIds("");
         claim.setReferenceToken("");
         claim.setReferenceView("");
+        claim.setAdviceDecision("");
+        claim.setSessionWebhook(ClaimTexts.clip(ClaimTexts.empty(inbound.sessionWebhook()), 1000));
         caseMapper.insert(claim);
         return claim;
     }
@@ -451,7 +464,9 @@ public class ClaimConversationService {
             pace.startWaiting();
         }
         try {
+            String symptomBefore = ClaimTexts.empty(claim.getSymptom());
             keepFullPhenomenon(claim);
+            boolean symptomGrew = !symptomBefore.equals(ClaimTexts.empty(claim.getSymptom()));
             String blob = complaintBlob(claim);
             ClaimSopNode symptom = sopService.matchSymptom(blob);
             ClaimSopNode action = sopService.pickAction(symptom, claim);
@@ -459,19 +474,24 @@ public class ClaimConversationService {
                 claim.setSymptomCode(symptom.getNodeCode());
             }
             claim.setSopTitle(action == null ? "" : action.getTitle());
+            if (ClaimTexts.blank(claim.getSymptomCategory()) || symptomGrew) {
+                claim.setSymptomCategory(ClaimSymptomCategory.classify(claim.getSymptom(), claim.getProductName(),
+                        claim.getProductCategory(), "", claim.getLogisticsSummary()));
+            }
+            if (ClaimTexts.blank(claim.getProductGroup()) || symptomGrew) {
+                claim.setProductGroup(ClaimProductGroup.of(claim.getProductName(), claim.getProductCategory(), claim.getSymptom()));
+            }
             HistoryMatches matches = matchHistory(claim, null);
             claim.setSimilarCaseIds(matches.ids());
             String evidence = evidence(symptom, action, matches);
             String suggestion = suggest(claim, action, matches, evidence);
-            String page = saveReferences(claim, matches);
-            if (pace != null && !ClaimTexts.blank(page)) {
-                pendingAction.set(new ClaimAction("查看历史参照案例", page));
-            }
+            saveReferences(claim, matches);
             claim.setRecommendation(suggestion);
             claim.setRecommendationBasis(evidence);
             claim.setStatus(ClaimCase.RECOMMENDED);
             claim.setPendingSlot("");
             caseMapper.updateById(claim);
+            pendingActions.set(adviceButtons(claim));
             return suggestion;
         } finally {
             if (pace != null) {
@@ -482,17 +502,36 @@ public class ClaimConversationService {
 
     private String suggest(ClaimCase claim, ClaimSopNode action, HistoryMatches matches, String evidence) {
         if (!matches.judged()) {
-            return "综合建议：历史对照没有完成，请人工按现象定方案。";
+            return advice("历史对照没有完成，本次现象还不能定论。",
+                    "请人工核对现象、产品和顾客诉求。",
+                    "先不要自动给赔偿，按现象人工定方案。");
         }
         if (matches.actionable.isEmpty()) {
             String title = action == null ? "现象" : action.getTitle();
-            return "综合建议：没有历史参照案例。按「" + title + "」处理。";
+            return advice("没有等价的历史参照，按「" + title + "」定性。",
+                    "按该流程核实证据、客群和责任。",
+                    "按「" + title + "」处理。");
         }
-        String decision = withoutNoHistoryClaim(synthesize(claim, sopSentence(action), evidence));
-        if (!decision.startsWith("综合建议")) {
-            decision = "综合建议：" + decision;
+        return asAdvice(withoutNoHistoryClaim(synthesize(claim, sopSentence(action), evidence)));
+    }
+
+    /** 综合建议固定三段：事件定性、行动要素、具体方案。 */
+    private String advice(String nature, String actions, String plan) {
+        return ClaimTexts.advice(nature, actions, plan);
+    }
+
+    /** 模型没按三段写时，退回按历史参照处理的固定格式。 */
+    private String asAdvice(String answer) {
+        String text = ClaimTexts.empty(answer).trim();
+        if (!text.contains("事件定性") || !text.contains("行动要素") || !text.contains("具体方案")) {
+            return advice("按历史参照案例和理赔 SOP 定性。",
+                    "核对现象、证据和客群。",
+                    "按历史参照案例的结案方式处理。");
         }
-        return decision;
+        if (!text.startsWith("综合建议")) {
+            text = "综合建议：\n" + text;
+        }
+        return text;
     }
 
     /** 已经命中历史参照时，模型仍可能套「没有历史参照案例」这句，删掉。 */
@@ -507,8 +546,7 @@ public class ClaimConversationService {
             }
             kept.append(line);
         }
-        String text = kept.toString().trim();
-        return text.isBlank() ? "综合建议：按历史参照案例的结案方式处理，并核对理赔 SOP。" : text;
+        return kept.toString().trim();
     }
 
     /** 高于 0.85 的参照、相似案例，以及全部特殊案例，供免登页按等价度分 tab。 */
@@ -519,58 +557,90 @@ public class ClaimConversationService {
         collectMarks(marks, matches.special, "special", 0.8, true);
         if (marks.isEmpty()) {
             claim.setReferenceView("");
-            return "";
-        }
-        marks.sort(Comparator.comparingDouble(RefMark::getScore).reversed());
-        if (marks.size() > 40) {
-            marks.subList(40, marks.size()).clear();
+        } else {
+            marks.sort(Comparator.comparingDouble(RefMark::getScore).reversed());
+            if (marks.size() > 40) {
+                marks.subList(40, marks.size()).clear();
+            }
+            try {
+                claim.setReferenceView(objectMapper.writeValueAsString(marks));
+            } catch (Exception ex) {
+                log.warn("历史参照页数据写入失败: {}", ex.getMessage());
+                claim.setReferenceView("");
+            }
         }
         if (ClaimTexts.blank(claim.getReferenceToken())) {
             claim.setReferenceToken(UUID.randomUUID().toString().replace("-", ""));
         }
-        try {
-            claim.setReferenceView(objectMapper.writeValueAsString(marks));
-        } catch (Exception ex) {
-            log.warn("历史参照页数据写入失败: {}", ex.getMessage());
-            claim.setReferenceView("");
-            return "";
+        return refsUrl(claim);
+    }
+
+    /** 卡片上的确定操作。没有公网地址时返回空，建议仍以文字发出。 */
+    public List<ClaimAction> adviceButtons(ClaimCase claim) {
+        String base = publicBase();
+        if (base.isBlank() || claim == null || ClaimTexts.blank(claim.getReferenceToken())) {
+            return List.of();
         }
-        String base = ClaimTexts.empty(claimProperties.getPublicBaseUrl());
-        while (base.endsWith("/")) {
-            base = base.substring(0, base.length() - 1);
+        String page = base + "/claim/advice/" + claim.getReferenceToken();
+        List<ClaimAction> buttons = new ArrayList<>();
+        buttons.add(new ClaimAction("完全采纳", page + "?do=adopt"));
+        buttons.add(new ClaimAction("不满意重出", page + "?do=redo"));
+        buttons.add(new ClaimAction("部分修改", page + "?do=edit"));
+        if (!ClaimTexts.blank(claim.getReferenceView())) {
+            buttons.add(new ClaimAction("查看参照", base + "/claim/refs/" + claim.getReferenceToken()));
         }
-        if (base.isBlank()) {
+        return buttons;
+    }
+
+    private String refsUrl(ClaimCase claim) {
+        String base = publicBase();
+        if (base.isBlank() || ClaimTexts.blank(claim.getReferenceView()) || ClaimTexts.blank(claim.getReferenceToken())) {
             return "";
         }
         return base + "/claim/refs/" + claim.getReferenceToken();
     }
 
+    private String publicBase() {
+        String base = ClaimTexts.empty(claimProperties.getPublicBaseUrl());
+        while (base.endsWith("/")) {
+            base = base.substring(0, base.length() - 1);
+        }
+        return base;
+    }
+
     private void collectMarks(List<RefMark> marks, List<Ranked> rows, String kind, double floor, boolean includeFloor) {
         for (Ranked item : rows) {
             boolean keep = includeFloor ? item.similarity >= floor : item.similarity > floor;
-            if (!keep || item.row == null || item.row.getId() == null) {
+            if (!keep || item.row == null || item.row.id() <= 0) {
                 continue;
             }
             RefMark mark = new RefMark();
-            mark.setId(item.row.getId());
+            mark.setId(item.row.id());
             mark.setScore(item.similarity);
             mark.setKind(kind);
+            mark.setSource(item.row.source());
             marks.add(mark);
         }
     }
 
     private String synthesize(ClaimCase claim, String sop, String evidence) {
-        String fallback = "综合建议：按历史参照案例的结案方式处理，并核对理赔 SOP。";
+        String fallback = advice("按历史参照案例和理赔 SOP 定性。",
+                "核对现象、证据和客群。",
+                "按历史参照案例的结案方式处理。");
         if (!aiChatService.isEnabled()) {
             return fallback;
         }
         String system = """
-                你是小巴依理赔助手。只写综合建议，以「综合建议：」开头。
-                用三到五句讲清这次怎么处理：核实什么、补发还是退款、责任归谁。不要罗列案例，不要写依据标题。
+                你是小巴依理赔助手。只写综合建议，以「综合建议：」开头，后面只写这三行，不要多写别的标题：
+                1. 事件定性：这次投诉属于什么问题，责任倾向是质量、物流还是服务，能不能理赔。
+                2. 行动要素：要核实什么、要什么证据、看新客还是老客。
+                3. 具体方案：补发、退款、换货或赔偿怎么做，写清数量、金额和责任归属。
+                每项一到两句。不要罗列案例，不要写依据标题。
                 证据里已经有历史参照案例时，禁止写「没有历史参照案例」。
                 特殊案例不能当作这次的处理动作。相似案例不能当主依据。
                 货品不够、漏装不要写成缺斤，不要写退一赔三。缺斤查实才写退一赔三，异物索赔才写十倍且不足按 1000 元。
                 牛羊肉坏了不要写成蔬菜坏果。用中文，不要输出 JSON。
+                证据里有人工完全采纳或部分采纳的建议时，具体方案向那些靠拢。已退回的方案不要再写。
                 """;
         try {
             String answer = aiChatService.chat(system, "档案：\n" + snapshot(claim) + "\n\n" + evidence + "\n\nSOP：" + sop, null, 0.2);
@@ -590,10 +660,19 @@ public class ClaimConversationService {
 
     private String evidence(ClaimSopNode symptom, ClaimSopNode action, HistoryMatches matches) {
         StringBuilder text = new StringBuilder();
+        String category = ClaimTexts.empty(matches.category());
+        String productGroup = ClaimTexts.empty(matches.productGroup());
+        if (!category.isBlank()) {
+            text.append("现象大类：").append(category);
+            if (!productGroup.isBlank() && !ClaimProductGroup.OTHER.equals(productGroup)) {
+                text.append("，产品：").append(productGroup);
+            }
+            text.append("。只在这一范围的历史案例和理赔档案里对照。\n");
+        }
         if (!matches.judged()) {
             text.append("历史参照案例：双向 NLI 没有完成，本次没有可参照的历史案例。\n");
         } else if (matches.actionable.isEmpty()) {
-            text.append("历史参照案例：没有现象等价度达到 0.9 的可参照记录。\n");
+            text.append("历史参照案例：这一类里没有现象等价度达到 0.9 的可参照记录。\n");
         } else {
             text.append("历史参照案例（双向 NLI 等价度不低于 0.9）：\n");
             appendCases(text, matches.actionable);
@@ -612,46 +691,112 @@ public class ClaimConversationService {
         if (action != null && (symptom == null || !action.getNodeCode().equals(symptom.getNodeCode()))) {
             text.append("SOP 处理：").append(action.getTitle()).append("。").append(ClaimTexts.empty(action.getContent())).append("\n");
         }
+        appendDecisions(text, matches.category(), matches.productGroup());
         return text.toString().trim();
+    }
+
+    /** 同一现象大类、同一产品里，人工采纳或退回过的建议。 */
+    private void appendDecisions(StringBuilder text, String category, String productGroup) {
+        if (ClaimTexts.blank(category)) {
+            return;
+        }
+        List<ClaimAdviceDecision> rows = loadDecisions(category, productGroup);
+        if (rows.isEmpty() && !ClaimTexts.blank(productGroup) && !ClaimProductGroup.OTHER.equals(productGroup)) {
+            rows = loadDecisions(category, "");
+        }
+        int kept = 0;
+        int rejected = 0;
+        StringBuilder block = new StringBuilder();
+        for (ClaimAdviceDecision row : rows) {
+            if (ClaimAdviceDecision.REDO.equals(row.getDecision())) {
+                if (rejected >= 3 || ClaimTexts.blank(row.getOriginalAdvice())) {
+                    continue;
+                }
+                rejected++;
+                block.append("- 已退回，不要照抄：").append(ClaimTexts.clip(row.getOriginalAdvice(), 180)).append('\n');
+                continue;
+            }
+            if (kept >= 5 || ClaimTexts.blank(row.getFinalAdvice())) {
+                continue;
+            }
+            kept++;
+            String label = ClaimAdviceDecision.PARTIAL.equals(row.getDecision()) ? "部分采纳" : "完全采纳";
+            block.append("- ").append(label).append("：").append(ClaimTexts.clip(row.getFinalAdvice(), 180)).append('\n');
+        }
+        if (block.isEmpty()) {
+            return;
+        }
+        text.append("人工处理过的建议（同现象大类、同产品，优先参照）：\n").append(block);
+    }
+
+    private List<ClaimAdviceDecision> loadDecisions(String category, String productGroup) {
+        LambdaQueryWrapper<ClaimAdviceDecision> query = new LambdaQueryWrapper<ClaimAdviceDecision>()
+                .eq(ClaimAdviceDecision::getSymptomCategory, category)
+                .orderByDesc(ClaimAdviceDecision::getId)
+                .last("limit 20");
+        if (!ClaimTexts.blank(productGroup) && !ClaimProductGroup.OTHER.equals(productGroup)) {
+            query.eq(ClaimAdviceDecision::getProductGroup, productGroup);
+        }
+        return decisionMapper.selectList(query);
     }
 
     private void appendCases(StringBuilder text, List<Ranked> rows) {
         int index = 1;
         for (Ranked item : rows) {
-            ClaimHistoryCase row = item.row;
-            text.append(index++).append(". 等价度 ").append(String.format(java.util.Locale.ROOT, "%.2f", item.similarity)).append(" ")
-                    .append(ClaimTexts.empty(row.getComplaintDate())).append(" ")
-                    .append(ClaimTexts.empty(row.getCustomerName())).append(" ")
-                    .append(ClaimTexts.empty(row.getSymptomBrief())).append(" / ")
-                    .append(ClaimTexts.empty(row.getProductName()))
+            RefRow row = item.row;
+            String origin = "archive".equals(row.source()) ? "档案" : "历史";
+            text.append(index++).append(". ").append(origin)
+                    .append(" 等价度 ").append(String.format(java.util.Locale.ROOT, "%.2f", item.similarity)).append(" ")
+                    .append(ClaimTexts.empty(row.date())).append(" ")
+                    .append(ClaimTexts.empty(row.customerName())).append(" ")
+                    .append(ClaimTexts.empty(row.phenomenon())).append(" / ")
+                    .append(ClaimTexts.empty(row.productName()))
                     .append(" → ").append(clipOpinion(row))
-                    .append("（").append(ClaimTexts.empty(row.getJudgment())).append("）\n");
+                    .append("（").append(ClaimTexts.empty(row.judgment())).append("）\n");
         }
     }
 
-    private String clipOpinion(ClaimHistoryCase item) {
-        String opinion = ClaimTexts.empty(item.getClaimOpinion());
+    private String clipOpinion(RefRow item) {
+        String opinion = ClaimTexts.empty(item.opinion());
         if (opinion.isBlank()) {
-            opinion = ClaimTexts.empty(item.getClaimProduct());
-        }
-        if (opinion.isBlank()) {
-            opinion = ClaimTexts.empty(item.getResultText());
+            opinion = ClaimTexts.empty(item.resultText());
         }
         return ClaimTexts.clip(opinion.replace("\n", " "), 80);
     }
 
     private HistoryMatches matchHistory(ClaimCase claim, Consumer<String> progress) {
-        List<ClaimHistoryCase> all = historyMapper.selectList(new LambdaQueryWrapper<ClaimHistoryCase>()
-                .orderByDesc(ClaimHistoryCase::getId));
+        if (ClaimTexts.blank(claim.getSymptomCategory())) {
+            claim.setSymptomCategory(ClaimSymptomCategory.classify(claim.getSymptom(), claim.getProductName(),
+                    claim.getProductCategory(), "", claim.getLogisticsSummary()));
+        }
+        String category = ClaimTexts.empty(claim.getSymptomCategory());
+        String productGroup = ClaimTexts.empty(claim.getProductGroup());
+        if (productGroup.isBlank()) {
+            productGroup = ClaimProductGroup.of(claim.getProductName(), claim.getProductCategory(), claim.getSymptom());
+            claim.setProductGroup(productGroup);
+        }
+        note(progress, "现象大类：" + category + "，产品：" + productGroup + "。正在对照这一范围的历史案例和档案。");
+        List<String> keys = ClaimSymptomCategory.searchKeys(category);
+        List<RefRow> pool = loadRefs(claim, keys, productGroup);
+        if (pool.isEmpty() && !ClaimProductGroup.OTHER.equals(productGroup)) {
+            note(progress, "这个产品在「" + category + "」里还没有记录，改为对照整个大类。");
+            pool = loadRefs(claim, keys, "");
+        }
+        if (pool.isEmpty()) {
+            List<String> wider = ClaimSymptomCategory.widenKeys(category);
+            if (!wider.isEmpty()) {
+                note(progress, "这一类还没有记录，扩大到「" + ClaimSymptomCategory.familyOf(category) + "」。");
+                pool = loadRefs(claim, wider, productGroup);
+                if (pool.isEmpty() && !ClaimProductGroup.OTHER.equals(productGroup)) {
+                    pool = loadRefs(claim, wider, "");
+                }
+            }
+        }
         String claimOriginal = complaintOriginal(claim);
         LinkedHashSet<String> phenomena = new LinkedHashSet<>();
-        for (ClaimHistoryCase row : all) {
-            if (categoryConflict(claim, row)) {
-                continue;
-            }
-            String phenomenon = phenomenonOriginal(row);
-            if (!phenomenon.isBlank()) {
-                phenomena.add(phenomenon);
+        for (RefRow row : pool) {
+            if (!row.phenomenon().isBlank()) {
+                phenomena.add(row.phenomenon());
             }
         }
         Map<String, Double> exact = new LinkedHashMap<>();
@@ -672,17 +817,13 @@ public class ClaimConversationService {
         List<Ranked> similar = new ArrayList<>();
         boolean judged = pending.isEmpty() || judgement.completed() || !exact.isEmpty();
         if (judged) {
-            for (ClaimHistoryCase row : all) {
-                if (categoryConflict(claim, row)) {
-                    continue;
-                }
-                String phenomenon = phenomenonOriginal(row);
-                double similarity = exact.getOrDefault(phenomenon, judgement.scoreOf(phenomenon));
+            for (RefRow row : pool) {
+                double similarity = exact.getOrDefault(row.phenomenon(), judgement.scoreOf(row.phenomenon()));
                 if (similarity < 0.8) {
                     continue;
                 }
                 Ranked ranked = new Ranked(row, similarity);
-                boolean noClaim = ClaimTexts.noClaimOutcome(row.getJudgment(), row.getResultText(), row.getClaimOpinion(), row.getAdminResult());
+                boolean noClaim = ClaimTexts.noClaimOutcome(row.judgment(), row.resultText(), row.opinion(), row.adminResult());
                 if (noClaim) {
                     special.add(ranked);
                 } else if (similarity >= 0.9) {
@@ -696,7 +837,43 @@ public class ClaimConversationService {
         actionable.sort(order);
         special.sort(order);
         similar.sort(order);
-        return new HistoryMatches(actionable, special, similar, judged);
+        return new HistoryMatches(actionable, special, similar, judged, category, productGroup);
+    }
+
+    /** 先按现象大类和产品分组取出历史案例和已出建议的档案。 */
+    private List<RefRow> loadRefs(ClaimCase claim, List<String> keys, String productGroup) {
+        if (keys == null || keys.isEmpty()) {
+            return List.of();
+        }
+        boolean sameProduct = !ClaimTexts.blank(productGroup) && !ClaimProductGroup.OTHER.equals(productGroup);
+        List<RefRow> rows = new ArrayList<>();
+        List<ClaimHistoryCase> history = historyMapper.selectList(new LambdaQueryWrapper<ClaimHistoryCase>()
+                .in(ClaimHistoryCase::getSymptomCategory, keys)
+                .eq(sameProduct, ClaimHistoryCase::getProductGroup, productGroup)
+                .orderByDesc(ClaimHistoryCase::getId));
+        for (ClaimHistoryCase row : history) {
+            String phenomenon = phenomenonOriginal(row);
+            if (phenomenon.isBlank() || categoryConflict(claim, row.getProductCategory(), row.getProductName(), phenomenon)) {
+                continue;
+            }
+            rows.add(new RefRow("history", row.getId(), phenomenon, row.getComplaintDate(), row.getCustomerName(),
+                    row.getProductName(), row.getClaimOpinion(), row.getJudgment(), row.getResultText(), row.getAdminResult()));
+        }
+        List<ClaimCase> archives = caseMapper.selectList(new LambdaQueryWrapper<ClaimCase>()
+                .in(ClaimCase::getSymptomCategory, keys)
+                .eq(sameProduct, ClaimCase::getProductGroup, productGroup)
+                .eq(ClaimCase::getStatus, ClaimCase.RECOMMENDED)
+                .ne(claim.getId() != null, ClaimCase::getId, claim.getId())
+                .orderByDesc(ClaimCase::getId));
+        for (ClaimCase row : archives) {
+            String phenomenon = ClaimTexts.empty(row.getSymptom());
+            if (phenomenon.isBlank() || categoryConflict(claim, row.getProductCategory(), row.getProductName(), phenomenon)) {
+                continue;
+            }
+            rows.add(new RefRow("archive", row.getId(), phenomenon, row.getPurchaseDate(), row.getCustomerName(),
+                    row.getProductName(), row.getRecommendation(), "", "", ""));
+        }
+        return rows;
     }
 
     /** 关键词抽取会把「产品-不香、不好吃」收成「不香」。原文里有完整现象时改回来。 */
@@ -766,10 +943,10 @@ public class ClaimConversationService {
     }
 
     /** 肉类和蔬菜坏果不是同一现象，不送去 NLI。 */
-    private boolean categoryConflict(ClaimCase claim, ClaimHistoryCase row) {
-        String brief = ClaimTexts.empty(row.getSymptomBrief());
+    private boolean categoryConflict(ClaimCase claim, String productCategory, String productName, String phenomenon) {
+        String brief = ClaimTexts.empty(phenomenon);
         String claimSide = ClaimTexts.empty(claim.getProductCategory()) + ClaimTexts.empty(claim.getProductName()) + ClaimTexts.empty(claim.getSymptom());
-        String rowSide = ClaimTexts.empty(row.getProductCategory()) + ClaimTexts.empty(row.getProductName()) + brief;
+        String rowSide = ClaimTexts.empty(productCategory) + ClaimTexts.empty(productName) + brief;
         boolean claimMeat = ClaimTexts.meatText(claimSide) && !ClaimTexts.produceText(claimSide);
         boolean rowProduce = ClaimTexts.produceText(rowSide) || brief.contains("坏果");
         boolean rowMeat = ClaimTexts.meatText(rowSide);
@@ -847,6 +1024,16 @@ public class ClaimConversationService {
             return node.getNodeCode();
         }
         return "";
+    }
+
+    /** 收集过程中就把现象大类和产品分组写进档案，后面中断或出建议都能接着用。 */
+    private void rememberClassification(ClaimCase claim) {
+        if (ClaimTexts.blank(claim.getSymptom()) && ClaimTexts.blank(claim.getProductName())) {
+            return;
+        }
+        claim.setSymptomCategory(ClaimSymptomCategory.classify(claim.getSymptom(), claim.getProductName(),
+                claim.getProductCategory(), "", claim.getLogisticsSummary()));
+        claim.setProductGroup(ClaimProductGroup.of(claim.getProductName(), claim.getProductCategory(), claim.getSymptom()));
     }
 
     private void fillCategory(ClaimCase claim) {
@@ -1099,10 +1286,15 @@ public class ClaimConversationService {
         }
     }
 
-    private record Ranked(ClaimHistoryCase row, double similarity) {
+    private record RefRow(String source, long id, String phenomenon, String date, String customerName, String productName,
+                          String opinion, String judgment, String resultText, String adminResult) {
     }
 
-    private record HistoryMatches(List<Ranked> actionable, List<Ranked> special, List<Ranked> similar, boolean judged) {
+    private record Ranked(RefRow row, double similarity) {
+    }
+
+    private record HistoryMatches(List<Ranked> actionable, List<Ranked> special, List<Ranked> similar, boolean judged,
+                                  String category, String productGroup) {
         String ids() {
             StringBuilder text = new StringBuilder();
             appendIds(text, actionable);
@@ -1113,7 +1305,10 @@ public class ClaimConversationService {
 
         private static void appendIds(StringBuilder text, List<Ranked> rows) {
             for (Ranked item : rows) {
-                String id = String.valueOf(item.row.getId());
+                if (!"history".equals(item.row.source())) {
+                    continue;
+                }
+                String id = String.valueOf(item.row.id());
                 if (text.length() + id.length() + 1 > 1900) {
                     return;
                 }

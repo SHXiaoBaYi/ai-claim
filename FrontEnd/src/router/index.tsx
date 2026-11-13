@@ -33,6 +33,7 @@ function PagePlaceholder() {
 const Login = lazy(() => import('@/pages/login'));
 const NotFound = lazy(() => import('@/pages/404'));
 const ClaimRefs = lazy(() => import('@/pages/claim/refs'));
+const ClaimAdvice = lazy(() => import('@/pages/claim/advice'));
 
 function withSuspense(Component: LazyExoticComponent<any>) {
   return (
@@ -117,6 +118,11 @@ export function createAppRouter(menus: MenuTree[], isLoggedIn: boolean) {
           errorElement: <RouteErrorPage />,
         },
         {
+          path: '/claim/advice/:token',
+          element: withSuspense(ClaimAdvice),
+          errorElement: <RouteErrorPage />,
+        },
+        {
           path: '*',
           element: (
             <Navigate
@@ -137,6 +143,11 @@ export function createAppRouter(menus: MenuTree[], isLoggedIn: boolean) {
       {
         path: '/claim/refs/:token',
         element: withSuspense(ClaimRefs),
+        errorElement: <RouteErrorPage />,
+      },
+      {
+        path: '/claim/advice/:token',
+        element: withSuspense(ClaimAdvice),
         errorElement: <RouteErrorPage />,
       },
       {

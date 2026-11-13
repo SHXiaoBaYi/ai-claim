@@ -2,6 +2,7 @@ package com.base.admin.claim.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.base.admin.claim.domain.ClaimAdviceDecision;
 import com.base.admin.claim.domain.ClaimCase;
 import com.base.admin.claim.domain.ClaimEvidence;
 import com.base.admin.claim.domain.ClaimHistoryCase;
@@ -9,29 +10,37 @@ import com.base.admin.claim.domain.ClaimMessage;
 import com.base.admin.claim.dto.ClaimArchiveDetailVO;
 import com.base.admin.claim.dto.ClaimArchiveUpdateDTO;
 import com.base.admin.claim.dto.ClaimPageQueryDTO;
+import com.base.admin.claim.mapper.ClaimAdviceDecisionMapper;
 import com.base.admin.claim.mapper.ClaimCaseMapper;
 import com.base.admin.claim.mapper.ClaimEvidenceMapper;
 import com.base.admin.claim.mapper.ClaimHistoryCaseMapper;
 import com.base.admin.claim.mapper.ClaimMessageMapper;
+import com.base.admin.claim.support.ClaimProductGroup;
+import com.base.admin.claim.support.ClaimSymptomCategory;
 import com.base.admin.claim.support.ClaimTexts;
 import com.base.admin.common.PageResult;
 import com.base.admin.exception.BusinessException;
+import com.base.admin.util.SecurityUtils;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class ClaimArchiveService {
 
     private final ClaimCaseMapper caseMapper;
+    private final ClaimAdviceDecisionMapper decisionMapper;
     private final ClaimMessageMapper messageMapper;
     private final ClaimEvidenceMapper evidenceMapper;
     private final ClaimHistoryCaseMapper historyMapper;
     private final ClaimFileStorage fileStorage;
+    private final ClaimAdviceService adviceService;
 
     public PageResult<ClaimCase> page(ClaimPageQueryDTO query) {
         LambdaQueryWrapper<ClaimCase> wrapper = new LambdaQueryWrapper<ClaimCase>()
@@ -57,6 +66,9 @@ public class ClaimArchiveService {
                 .eq(ClaimEvidence::getCaseId, id)
                 .orderByAsc(ClaimEvidence::getId)));
         vo.setSimilarCases(loadSimilar(archive.getSimilarCaseIds()));
+        vo.setDecisions(decisionMapper.selectList(new LambdaQueryWrapper<ClaimAdviceDecision>()
+                .eq(ClaimAdviceDecision::getCaseId, id)
+                .orderByDesc(ClaimAdviceDecision::getId)));
         return vo;
     }
 
@@ -68,8 +80,15 @@ public class ClaimArchiveService {
         return evidence;
     }
 
+    @Transactional
     public void update(ClaimArchiveUpdateDTO dto) {
         ClaimCase archive = require(dto.getId());
+        boolean textChanged = changed(archive.getSymptom(), dto.getSymptom())
+                || changed(archive.getProductName(), dto.getProductName())
+                || changed(archive.getProductCategory(), dto.getProductCategory())
+                || changed(archive.getLogisticsSummary(), dto.getLogisticsSummary());
+        String previousCategory = archive.getSymptomCategory();
+        String previousGroup = archive.getProductGroup();
         archive.setCustomerName(ClaimTexts.empty(dto.getCustomerName()));
         archive.setCustomerPhone(ClaimTexts.empty(dto.getCustomerPhone()));
         archive.setCustomerAddress(ClaimTexts.empty(dto.getCustomerAddress()));
@@ -77,6 +96,8 @@ public class ClaimArchiveService {
         archive.setCustomerType(ClaimTexts.empty(dto.getCustomerType()));
         archive.setConsumeSummary(ClaimTexts.empty(dto.getConsumeSummary()));
         archive.setProductCategory(ClaimTexts.empty(dto.getProductCategory()));
+        archive.setProductGroup(ClaimSymptomCategory.choose(dto.getProductGroup(), previousGroup, textChanged,
+                ClaimProductGroup.of(dto.getProductName(), dto.getProductCategory(), dto.getSymptom())));
         archive.setProductName(ClaimTexts.empty(dto.getProductName()));
         archive.setProductSpec(ClaimTexts.empty(dto.getProductSpec()));
         archive.setStoreName(ClaimTexts.empty(dto.getStoreName()));
@@ -85,10 +106,15 @@ public class ClaimArchiveService {
         archive.setLogisticsNo(ClaimTexts.empty(dto.getLogisticsNo()));
         archive.setLogisticsSummary(ClaimTexts.empty(dto.getLogisticsSummary()));
         archive.setSymptom(ClaimTexts.empty(dto.getSymptom()));
+        archive.setSymptomCategory(ClaimSymptomCategory.choose(dto.getSymptomCategory(), previousCategory, textChanged,
+                ClaimSymptomCategory.classify(dto.getSymptom(), dto.getProductName(), dto.getProductCategory(),
+                        "", dto.getLogisticsSummary())));
+        String previousAdvice = archive.getRecommendation();
         archive.setCookingMethod(ClaimTexts.empty(dto.getCookingMethod()));
         archive.setCustomerDemand(ClaimTexts.empty(dto.getCustomerDemand()));
         archive.setRecommendation(ClaimTexts.empty(dto.getRecommendation()));
         archive.setRecommendationBasis(ClaimTexts.empty(dto.getRecommendationBasis()));
+        adviceService.recordManual(archive, previousAdvice, archive.getRecommendation(), SecurityUtils.getCurrentUsername());
         caseMapper.updateById(archive);
     }
 
@@ -107,6 +133,42 @@ public class ClaimArchiveService {
         }
         fileStorage.deleteCaseDir(id);
         caseMapper.deleteById(id);
+    }
+
+    /** 只补空着的现象大类和产品分组。档案从收集开始就带着这两项，后面才能按类积累。 */
+    public void fillSymptomCategories() {
+        List<ClaimCase> rows = caseMapper.selectList(new LambdaQueryWrapper<ClaimCase>()
+                .and(wrapper -> wrapper.isNull(ClaimCase::getSymptomCategory)
+                        .or().eq(ClaimCase::getSymptomCategory, "")
+                        .or().isNull(ClaimCase::getProductGroup)
+                        .or().eq(ClaimCase::getProductGroup, "")));
+        int updated = 0;
+        for (ClaimCase row : rows) {
+            if (ClaimTexts.blank(row.getSymptom()) && ClaimTexts.blank(row.getProductName())) {
+                continue;
+            }
+            boolean changed = false;
+            if (ClaimTexts.blank(row.getSymptomCategory())) {
+                row.setSymptomCategory(ClaimSymptomCategory.classify(row.getSymptom(), row.getProductName(),
+                        row.getProductCategory(), "", row.getLogisticsSummary()));
+                changed = true;
+            }
+            if (ClaimTexts.blank(row.getProductGroup())) {
+                row.setProductGroup(ClaimProductGroup.of(row.getProductName(), row.getProductCategory(), row.getSymptom()));
+                changed = true;
+            }
+            if (changed) {
+                caseMapper.updateById(row);
+                updated++;
+            }
+        }
+        if (updated > 0) {
+            log.info("已补理赔档案现象大类和产品分组 {} 条", updated);
+        }
+    }
+
+    private boolean changed(String previous, String submitted) {
+        return !ClaimTexts.empty(previous).equals(ClaimTexts.empty(submitted));
     }
 
     public ClaimCase require(Long id) {

@@ -31,7 +31,8 @@ function isDingTalkBridgePath() {
       path.includes('/dingtalk/bridge') ||
       path.includes('/train/cashier-assistant') ||
       path.includes('/robot/link-monitor/fill') ||
-      path.includes('/claim/refs')
+      path.includes('/claim/refs') ||
+      path.includes('/claim/advice')
     );
   } catch {
     return false;

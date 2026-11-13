@@ -1,5 +1,6 @@
 package com.base.admin.claim;
 
+import com.base.admin.claim.service.ClaimArchiveService;
 import com.base.admin.claim.service.ClaimFileStorage;
 import com.base.admin.claim.service.ClaimHistoryService;
 import com.base.admin.claim.service.ClaimSopService;
@@ -20,6 +21,7 @@ public class ClaimDataInitializer implements ApplicationRunner {
     private final ClaimFileStorage fileStorage;
     private final ClaimSopService sopService;
     private final ClaimHistoryService historyService;
+    private final ClaimArchiveService archiveService;
 
     @Override
     public void run(ApplicationArguments args) {
@@ -32,5 +34,7 @@ public class ClaimDataInitializer implements ApplicationRunner {
         } catch (Exception ex) {
             log.warn("历史案例尚未导入：{}", ex.getMessage());
         }
+        historyService.fillSymptomCategories();
+        archiveService.fillSymptomCategories();
     }
 }

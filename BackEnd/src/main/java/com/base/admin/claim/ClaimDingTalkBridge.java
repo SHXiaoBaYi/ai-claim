@@ -1,5 +1,6 @@
 package com.base.admin.claim;
 
+import com.base.admin.claim.domain.ClaimCase;
 import com.base.admin.claim.domain.ClaimRobot;
 import com.base.admin.claim.dto.ClaimRobotSaveDTO;
 import com.base.admin.claim.dto.ClaimRobotVO;
@@ -156,9 +157,9 @@ public class ClaimDingTalkBridge implements ApplicationRunner {
         WaitingPace pace = new WaitingPace(webhook);
         try {
             String reply = conversationService.handle(toInbound(message), pace);
-            ClaimConversationService.ClaimAction action = conversationService.takeAction();
-            if (action != null && !ClaimTexts.blank(action.url())) {
-                sendAction(webhook, reply, action.title(), action.url());
+            List<ClaimConversationService.ClaimAction> actions = conversationService.takeActions();
+            if (!actions.isEmpty()) {
+                sendCard(webhook, reply, actions);
             } else {
                 send(webhook, reply);
             }
@@ -184,7 +185,8 @@ public class ClaimDingTalkBridge implements ApplicationRunner {
                 ClaimTexts.empty(message.getSenderNick()),
                 textOf(message),
                 ClaimTexts.empty(message.getMsgtype()),
-                files);
+                files,
+                ClaimTexts.empty(message.getSessionWebhook()));
     }
 
     private void collectFiles(MessageContent content, List<ClaimFile> files) {
@@ -300,31 +302,71 @@ public class ClaimDingTalkBridge implements ApplicationRunner {
         }
     }
 
-    private void sendAction(String webhook, String text, String title, String url) {
-        if (ClaimTexts.blank(webhook)) {
+    /** 把重新生成的建议推回原来的钉钉会话。webhook 过期时只记日志。 */
+    public void pushAdvice(ClaimCase claim) {
+        if (claim == null || ClaimTexts.blank(claim.getSessionWebhook()) || ClaimTexts.blank(claim.getRecommendation())) {
+            return;
+        }
+        List<ClaimConversationService.ClaimAction> actions = conversationService.adviceButtons(claim);
+        if (actions.isEmpty()) {
+            send(claim.getSessionWebhook(), claim.getRecommendation());
+            return;
+        }
+        sendCard(claim.getSessionWebhook(), claim.getRecommendation(), actions);
+    }
+
+    private void sendCard(String webhook, String text, List<ClaimConversationService.ClaimAction> actions) {
+        if (ClaimTexts.blank(webhook) || actions == null || actions.isEmpty()) {
+            send(webhook, text);
             return;
         }
         try {
+            List<java.util.Map<String, String>> buttons = new ArrayList<>();
+            for (ClaimConversationService.ClaimAction action : actions) {
+                if (action == null || ClaimTexts.blank(action.url())) {
+                    continue;
+                }
+                buttons.add(java.util.Map.of(
+                        "title", ClaimTexts.blank(action.title()) ? "查看" : action.title(),
+                        "actionURL", action.url()));
+            }
+            if (buttons.isEmpty()) {
+                send(webhook, text);
+                return;
+            }
+            String markdown = ClaimTexts.blank(text) ? "综合建议：请人工处理。" : text.replace("\n", "\n\n");
             String body = objectMapper.writeValueAsString(java.util.Map.of(
                     "msgtype", "actionCard",
                     "actionCard", java.util.Map.of(
                             "title", "理赔建议",
-                            "text", ClaimTexts.blank(text) ? "综合建议：请人工处理。" : text,
-                            "singleTitle", ClaimTexts.blank(title) ? "查看历史参照案例" : title,
-                            "singleURL", url)));
+                            "text", markdown,
+                            "btnOrientation", "0",
+                            "btns", buttons)));
             HttpRequest request = HttpRequest.newBuilder(URI.create(webhook))
                     .timeout(Duration.ofSeconds(15))
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(body))
                     .build();
             HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() >= 300) {
-                send(webhook, text + "\n\n" + title + "：" + url);
+            String raw = response.body() == null ? "" : response.body();
+            if (response.statusCode() >= 300 || (raw.contains("errcode") && !raw.contains("\"errcode\":0"))) {
+                send(webhook, text + linkLines(actions));
             }
         } catch (Exception ex) {
             log.warn("理赔建议按钮发送失败: {}", ex.getMessage());
-            send(webhook, text + "\n\n" + title + "：" + url);
+            send(webhook, text + linkLines(actions));
         }
+    }
+
+    private String linkLines(List<ClaimConversationService.ClaimAction> actions) {
+        StringBuilder text = new StringBuilder();
+        for (ClaimConversationService.ClaimAction action : actions) {
+            if (action == null || ClaimTexts.blank(action.url())) {
+                continue;
+            }
+            text.append("\n").append(ClaimTexts.blank(action.title()) ? "打开" : action.title()).append("：").append(action.url());
+        }
+        return text.toString();
     }
 
     private final class WaitingPace implements ClaimConversationService.ClaimPace {
