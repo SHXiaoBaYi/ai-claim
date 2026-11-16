@@ -308,9 +308,16 @@ public final class ClaimTexts {
         return value;
     }
 
-    /** 综合建议固定三段，卡片、落库和人工修改都用这一份。 */
+    /** 综合建议固定四段，卡片、落库和人工修改都用这一份。 */
     public static String advice(String nature, String actions, String plan) {
-        return "综合建议：\n1. 事件定性：" + empty(nature) + "\n2. 行动要素：" + empty(actions) + "\n3. 具体方案：" + empty(plan);
+        return advice(nature, actions, plan, "");
+    }
+
+    public static String advice(String nature, String actions, String plan, String script) {
+        return "综合建议：\n1. 事件性质：" + empty(nature)
+                + "\n2. 行动步骤：" + empty(actions)
+                + "\n3. 具体方案：" + empty(plan)
+                + "\n4. 给顾客的参考话术：" + empty(script);
     }
 
     private static double clampProbability(double value) {

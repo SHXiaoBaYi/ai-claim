@@ -12,7 +12,9 @@ import com.base.admin.claim.mapper.ClaimCaseMapper;
 import com.base.admin.claim.mapper.ClaimEvidenceMapper;
 import com.base.admin.claim.mapper.ClaimHistoryCaseMapper;
 import com.base.admin.claim.mapper.ClaimMessageMapper;
+import com.base.admin.claim.ClaimPaths;
 import com.base.admin.claim.ClaimProperties;
+import com.base.admin.claim.support.ClaimConsumerLaw;
 import com.base.admin.claim.support.ClaimProductGroup;
 import com.base.admin.claim.support.ClaimSymptomCategory;
 import com.base.admin.claim.support.ClaimTexts;
@@ -51,6 +53,7 @@ public class ClaimConversationService {
     private final ClaimFileStorage fileStorage;
     private final ClaimPhenomenonNli phenomenonNli;
     private final ClaimProperties claimProperties;
+    private final ClaimPaths paths;
     private final AiChatService aiChatService;
     private final ObjectMapper objectMapper;
     private final ThreadLocal<List<ClaimAction>> pendingActions = new ThreadLocal<>();
@@ -483,7 +486,7 @@ public class ClaimConversationService {
             }
             HistoryMatches matches = matchHistory(claim, null);
             claim.setSimilarCaseIds(matches.ids());
-            String evidence = evidence(symptom, action, matches);
+            String evidence = evidence(claim, symptom, action, matches);
             String suggestion = suggest(claim, action, matches, evidence);
             saveReferences(claim, matches);
             claim.setRecommendation(suggestion);
@@ -503,30 +506,38 @@ public class ClaimConversationService {
     private String suggest(ClaimCase claim, ClaimSopNode action, HistoryMatches matches, String evidence) {
         if (!matches.judged()) {
             return advice("历史对照没有完成，本次现象还不能定论。",
-                    "请人工核对现象、产品和顾客诉求。",
-                    "先不要自动给赔偿，按现象人工定方案。");
+                    "请人工核对现象、产品和顾客诉求，特殊索赔先对照消协法分流。",
+                    "先不要自动给惩罚性赔偿，按现象人工定方案。",
+                    "您好，这边先帮您核实情况和凭证，核实清楚后再给您明确处理方案，请您稍等。");
         }
         if (matches.actionable.isEmpty()) {
             String title = action == null ? "现象" : action.getTitle();
-            return advice("没有等价的历史参照，按「" + title + "」定性。",
-                    "按该流程核实证据、客群和责任。",
-                    "按「" + title + "」处理。");
+            return advice("没有等价的历史参照，按「" + title + "」定性，并对照消协法看是否触发惩罚性赔偿。",
+                    "按该流程核实证据、客群和责任；顾客索赔时先分流食安十倍还是欺诈赔三。",
+                    "按「" + title + "」处理。",
+                    "您好，非常抱歉给您带来不便。我们会按核实结果给您退换或补偿，请您配合提供照片或凭证。");
         }
         return asAdvice(withoutNoHistoryClaim(synthesize(claim, sopSentence(action), evidence)));
     }
 
-    /** 综合建议固定三段：事件定性、行动要素、具体方案。 */
-    private String advice(String nature, String actions, String plan) {
-        return ClaimTexts.advice(nature, actions, plan);
+    /** 综合建议固定四段：事件性质、行动步骤、具体方案、给顾客的参考话术。 */
+    private String advice(String nature, String actions, String plan, String script) {
+        return ClaimTexts.advice(nature, actions, plan, script);
     }
 
-    /** 模型没按三段写时，退回按历史参照处理的固定格式。 */
+    /** 模型没按四段写时，退回按历史、消协法和 SOP 的固定格式。 */
     private String asAdvice(String answer) {
-        String text = ClaimTexts.empty(answer).trim();
-        if (!text.contains("事件定性") || !text.contains("行动要素") || !text.contains("具体方案")) {
-            return advice("按历史参照案例和理赔 SOP 定性。",
-                    "核对现象、证据和客群。",
-                    "按历史参照案例的结案方式处理。");
+        String text = ClaimTexts.empty(answer).trim()
+                .replace("事件定性", "事件性质")
+                .replace("行动要素", "行动步骤");
+        if (!text.contains("事件性质") || !text.contains("行动步骤") || !text.contains("具体方案")) {
+            return advice("按历史参照案例、消协法和理赔 SOP 定性。",
+                    "核对现象、证据和客群；特殊索赔先按消协法分流。",
+                    "按历史参照案例的结案方式处理，未核实前不承诺惩罚性赔偿。",
+                    "您好，非常抱歉给您带来不便。我们先核实订单和货品情况，质量问题会给您退换或补偿，请您稍等。");
+        }
+        if (!text.contains("给顾客的参考话术")) {
+            text = text + "\n4. 给顾客的参考话术：您好，非常抱歉给您带来不便。我们会按核实结果给您处理，请您配合提供照片或消费凭证。";
         }
         if (!text.startsWith("综合建议")) {
             text = "综合建议：\n" + text;
@@ -624,21 +635,25 @@ public class ClaimConversationService {
     }
 
     private String synthesize(ClaimCase claim, String sop, String evidence) {
-        String fallback = advice("按历史参照案例和理赔 SOP 定性。",
-                "核对现象、证据和客群。",
-                "按历史参照案例的结案方式处理。");
+        String fallback = advice("按历史参照案例、消协法和理赔 SOP 定性。",
+                "核对现象、证据和客群；特殊索赔先按消协法分流。",
+                "按历史参照案例的结案方式处理，未核实前不承诺惩罚性赔偿。",
+                "您好，非常抱歉给您带来不便。我们先核实订单和货品情况，质量问题会给您退换或补偿，请您稍等。");
         if (!aiChatService.isEnabled()) {
             return fallback;
         }
         String system = """
-                你是小巴依理赔助手。只写综合建议，以「综合建议：」开头，后面只写这三行，不要多写别的标题：
-                1. 事件定性：这次投诉属于什么问题，责任倾向是质量、物流还是服务，能不能理赔。
-                2. 行动要素：要核实什么、要什么证据、看新客还是老客。
+                你是小巴依理赔助手。先看历史参照案例怎么结案，再对照消协法适用依据，再对照理赔 SOP，只写综合建议。
+                以「综合建议：」开头，后面只写这四行，不要多写别的标题：
+                1. 事件性质：这次投诉属于什么问题，责任倾向是质量、物流还是服务，能不能理赔；有索赔时写清走食安十倍、欺诈赔三，还是只退换补偿。
+                2. 行动步骤：要核实什么、要什么证据、看新客还是老客、要不要寄回核验。
                 3. 具体方案：补发、退款、换货或赔偿怎么做，写清数量、金额和责任归属。
+                4. 给顾客的参考话术：客服可直接发给顾客的原话，一两段，口语、致歉、说明下一步；不要写内部追责，不要对顾客念法条编号，除非顾客已经主张索赔。
                 每项一到两句。不要罗列案例，不要写依据标题。
                 证据里已经有历史参照案例时，禁止写「没有历史参照案例」。
                 特殊案例不能当作这次的处理动作。相似案例不能当主依据。
-                货品不够、漏装不要写成缺斤，不要写退一赔三。缺斤查实才写退一赔三，异物索赔才写十倍且不足按 1000 元。
+                货品不够、漏装不要写成缺斤，不要写退一赔三。缺斤查实且构成虚标/欺诈才写退一赔三，异物或变质索赔查实才写十倍且不足按 1000 元。
+                包装漏气、口感、肥瘦等无安全风险的，只退换或补偿，不要写惩罚性赔偿。
                 牛羊肉坏了不要写成蔬菜坏果。用中文，不要输出 JSON。
                 证据里有人工完全采纳或部分采纳的建议时，具体方案向那些靠拢。已退回的方案不要再写。
                 """;
@@ -658,8 +673,9 @@ public class ClaimConversationService {
         return "按「" + action.getTitle() + "」处理：" + ClaimTexts.empty(action.getContent());
     }
 
-    private String evidence(ClaimSopNode symptom, ClaimSopNode action, HistoryMatches matches) {
+    private String evidence(ClaimCase claim, ClaimSopNode symptom, ClaimSopNode action, HistoryMatches matches) {
         StringBuilder text = new StringBuilder();
+        appendLaw(text, claim);
         String category = ClaimTexts.empty(matches.category());
         String productGroup = ClaimTexts.empty(matches.productGroup());
         if (!category.isBlank()) {
@@ -693,6 +709,18 @@ public class ClaimConversationService {
         }
         appendDecisions(text, matches.category(), matches.productGroup());
         return text.toString().trim();
+    }
+
+    /** 顾客有索赔等特殊要求时先读消协法全文，其余案件只附分流口径。 */
+    private void appendLaw(StringBuilder text, ClaimCase claim) {
+        String demand = claim == null ? "" : ClaimTexts.empty(claim.getCustomerDemand());
+        String symptom = claim == null ? "" : ClaimTexts.empty(claim.getSymptom());
+        if (ClaimConsumerLaw.specialClaim(demand, symptom)) {
+            text.append("顾客有特殊索赔要求，必须先按下面消协法/食安法适用依据分流，再对照历史和 SOP：\n");
+            text.append(ClaimConsumerLaw.load(paths.historyDir())).append("\n");
+        } else {
+            text.append("消协法对照：").append(ClaimConsumerLaw.ROUTING).append("\n");
+        }
     }
 
     /** 同一现象大类、同一产品里，人工采纳或退回过的建议。 */

@@ -57,8 +57,9 @@ public class ClaimAdviceService {
     public ClaimAdvicePageVO partial(String token, ClaimAdviceEditDTO dto) {
         ClaimCase claim = require(token);
         ClaimAdviceEditDTO edit = dto == null ? new ClaimAdviceEditDTO() : dto;
-        String next = ClaimTexts.advice(edit.getNature(), edit.getActions(), edit.getPlan());
-        if (ClaimTexts.blank(edit.getNature()) && ClaimTexts.blank(edit.getActions()) && ClaimTexts.blank(edit.getPlan())) {
+        String next = ClaimTexts.advice(edit.getNature(), edit.getActions(), edit.getPlan(), edit.getScript());
+        if (ClaimTexts.blank(edit.getNature()) && ClaimTexts.blank(edit.getActions())
+                && ClaimTexts.blank(edit.getPlan()) && ClaimTexts.blank(edit.getScript())) {
             throw new BusinessException("请至少保留一段建议");
         }
         String previous = claim.getRecommendation();

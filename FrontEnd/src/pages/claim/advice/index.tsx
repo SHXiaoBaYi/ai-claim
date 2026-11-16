@@ -9,7 +9,7 @@ import {
   type ClaimAdvicePage,
 } from '@/api/claim';
 
-type Draft = { nature: string; actions: string; plan: string };
+type Draft = { nature: string; actions: string; plan: string; script: string };
 
 function pick(text: string, label: string) {
   const matched = text.match(new RegExp(label + '：([\\s\\S]*?)(?=\\n\\s*\\d+\\.\\s*|$)'));
@@ -19,9 +19,10 @@ function pick(text: string, label: string) {
 function splitAdvice(text?: string): Draft {
   const body = text || '';
   return {
-    nature: pick(body, '事件定性'),
-    actions: pick(body, '行动要素'),
+    nature: pick(body, '事件性质') || pick(body, '事件定性'),
+    actions: pick(body, '行动步骤') || pick(body, '行动要素'),
     plan: pick(body, '具体方案'),
+    script: pick(body, '给顾客的参考话术'),
   };
 }
 
@@ -38,7 +39,7 @@ export default function ClaimAdvicePage() {
   const [params] = useSearchParams();
   const intent = params.get('do');
   const [page, setPage] = useState<ClaimAdvicePage | null>(null);
-  const [draft, setDraft] = useState<Draft>({ nature: '', actions: '', plan: '' });
+  const [draft, setDraft] = useState<Draft>({ nature: '', actions: '', plan: '', script: '' });
   const [editing, setEditing] = useState(intent === 'edit');
   const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -108,7 +109,7 @@ export default function ClaimAdvicePage() {
       {editing ? (
         <div className='mt-4 space-y-3'>
           <label className='block text-sm text-neutral-700'>
-            事件定性
+            事件性质
             <Input.TextArea
               className='mt-1'
               rows={3}
@@ -117,7 +118,7 @@ export default function ClaimAdvicePage() {
             />
           </label>
           <label className='block text-sm text-neutral-700'>
-            行动要素
+            行动步骤
             <Input.TextArea
               className='mt-1'
               rows={3}
@@ -132,6 +133,15 @@ export default function ClaimAdvicePage() {
               rows={4}
               value={draft.plan}
               onChange={(event) => setDraft({ ...draft, plan: event.target.value })}
+            />
+          </label>
+          <label className='block text-sm text-neutral-700'>
+            给顾客的参考话术
+            <Input.TextArea
+              className='mt-1'
+              rows={4}
+              value={draft.script}
+              onChange={(event) => setDraft({ ...draft, script: event.target.value })}
             />
           </label>
         </div>

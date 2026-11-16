@@ -251,6 +251,9 @@ export function redoClaimAdviceApi(token: string) {
   return request.post<unknown, ClaimAdvicePage>(`/claim/advice/${encodeURIComponent(token)}/redo`);
 }
 
-export function editClaimAdviceApi(token: string, data: { nature: string; actions: string; plan: string }) {
+export function editClaimAdviceApi(
+  token: string,
+  data: { nature: string; actions: string; plan: string; script: string },
+) {
   return request.post<unknown, ClaimAdvicePage>(`/claim/advice/${encodeURIComponent(token)}/partial`, data);
 }
