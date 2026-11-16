@@ -222,7 +222,7 @@ public class ClaimConversationService {
                 || !ClaimTexts.blank(claim.getCookingMethod());
     }
 
-    /** 这句话里能确定的姓名、门店、产品、现象和相对日期，以这句话为准。 */
+    /** 模型没解析成功时，才用规则补这几个字段。 */
     private void normalizeFacts(ClaimCase claim, String text) {
         String name = ClaimTexts.customerNameOf(text);
         if (!name.isBlank()) {
@@ -326,9 +326,12 @@ public class ClaimConversationService {
             return;
         }
         if (!text.isBlank()) {
-            applyAi(claim, text);
-            extractLocal(claim, text);
-            normalizeFacts(claim, text);
+            if (!applyAi(claim, text)) {
+                extractLocal(claim, text);
+                normalizeFacts(claim, text);
+            } else {
+                fillGaps(claim, text);
+            }
             rememberNewCustomer(claim);
         }
         if ("evidence".equals(slot) && hasFile) {
@@ -361,8 +364,11 @@ public class ClaimConversationService {
     private void writeSlot(ClaimCase claim, String slot, String text) {
         switch (slot) {
             case "customerPhone" -> setPhone(claim, ClaimTexts.phoneOf(text));
-            case "customerName" -> setIfBlank(claim::getCustomerName, claim::setCustomerName,
-                    ClaimTexts.customerNameOf(text).isBlank() && text.length() <= 8 ? text : ClaimTexts.customerNameOf(text));
+            case "customerName" -> {
+                if (text.length() <= 8) {
+                    setIfBlank(claim::getCustomerName, claim::setCustomerName, text);
+                }
+            }
             case "storeName" -> setIfBlank(claim::getStoreName, claim::setStoreName,
                     ClaimTexts.storeNameOf(text).isBlank() && text.length() <= 16 ? text : ClaimTexts.storeNameOf(text));
             case "productName" -> setIfBlank(claim::getProductName, claim::setProductName,
@@ -379,9 +385,10 @@ public class ClaimConversationService {
         }
     }
 
-    private void applyAi(ClaimCase claim, String latest) {
+    /** 模型先解析。成功则规则不再改姓名、门店、产品和现象。 */
+    private boolean applyAi(ClaimCase claim, String latest) {
         if (!aiChatService.isEnabled() || latest.isBlank()) {
-            return;
+            return false;
         }
         String system = """
                 你是理赔信息抽取器。只分析用户最新这一句话里已经说出的事实。
@@ -389,20 +396,31 @@ public class ClaimConversationService {
                 和投诉无关的寒暄，所有字段都留空。
                 机器人之前的提问不算用户提供的信息。
                 今天是 %s。上周、上星期指上一个自然周周一到周日，写成 YYYY-MM-DD～YYYY-MM-DD，不要保留「上周」。
-                顾客只写姓名，不要带「反馈」。门店只写店名或平台。产品只写货品，不要带购买经过。
-                现象写成用户说的完整问题。顿号并列的都要保留，「产品-不香、不好吃」不要收成「不香」。
+                只写了月日、没有年份时，用今年，例如 11月9日写成 %s-11-09。
+                购买人、收件人、收货人、订货人、姓名后面的才是顾客姓名。「顾客反馈」「客户反馈」不是姓名。
+                购买地址写完整，不要只写到区。购买店铺、购买店面写店名或平台，例如上海抖店。
+                购买产品只写货品，件数写入规格。订单号、顺丰物流单号分开写。
+                反馈点是现象，保留完整问题。顿号并列的都要保留，「产品-不香、不好吃」不要收成「不香」。
                 没有分类前缀时写成「产品+问题」，例如羊肉太硬，不要只写太硬或肉太硬。
                 示例：顾客张三反馈上周在克西路店买的羊肉太硬了
                 → customerName=张三，storeName=克西路店，productName=羊肉，symptom=羊肉太硬，purchaseDate=%s。
+                示例：1.购买人：邢丽 13800001111
+                购买地址：山西省太原市小店区龙城街道星河湾6号园60栋1301
+                2.购买店铺：上海抖店【订单号：123456】
+                3.购买时间：11月9日
+                4.购买产品：小羯羊精品羊腿纯肉 1件
+                5.物流单号：顺丰速运 SF1000000000000
+                6.反馈点：顾客反馈收到的货品带骨，不是羊腿纯肉
+                → customerName=邢丽，customerPhone=13800001111，customerAddress=山西省太原市小店区龙城街道星河湾6号园60栋1301，storeName=上海抖店，orderNo=123456，purchaseDate=%s-11-09，productName=小羯羊精品羊腿纯肉，productSpec=1件，logisticsNo=SF1000000000000，symptom=货品带骨，不是羊腿纯肉。
                 只输出一个 JSON 对象，字段为：customerName, customerPhone, customerAddress, memberNo, customerType, consumeSummary, productCategory, productName, productSpec, storeName, purchaseDate, orderNo, logisticsNo, logisticsSummary, symptom, cookingMethod, customerDemand。
                 customerType 只能是 新客、老客 或空字符串。
                 牛羊肉坏了、变质、不新鲜写成「肉坏了」，不要写成坏果。坏果只用于蔬菜和水果。
-                """.formatted(today().toString(), ClaimTexts.purchaseDateOf("上周", today()));
+                """.formatted(today().toString(), today().getYear(), ClaimTexts.purchaseDateOf("上周", today()), today().getYear());
         try {
             String raw = aiChatService.chat(system, "已记录：\n" + snapshot(claim) + "\n用户最新一句：\n" + latest, null, 0.1);
             JsonNode node = readJson(raw);
             if (node == null) {
-                return;
+                return false;
             }
             setIfBlank(claim::getCustomerName, claim::setCustomerName, json(node, "customerName"));
             setPhone(claim, json(node, "customerPhone"));
@@ -424,8 +442,19 @@ public class ClaimConversationService {
             setIfBlank(claim::getSymptom, claim::setSymptom, json(node, "symptom"));
             setIfBlank(claim::getCookingMethod, claim::setCookingMethod, json(node, "cookingMethod"));
             setIfBlank(claim::getCustomerDemand, claim::setCustomerDemand, json(node, "customerDemand"));
+            return true;
         } catch (Exception ex) {
             log.warn("理赔字段抽取失败: {}", ex.getMessage());
+            return false;
+        }
+    }
+
+    /** 模型没填到的手机号和顺丰单号用原文补上。姓名、地址、店铺、现象不再用规则改。 */
+    private void fillGaps(ClaimCase claim, String text) {
+        setPhone(claim, ClaimTexts.phoneOf(text));
+        String logistics = text.replaceAll("(?s).*?(SF\\d{8,}).*", "$1");
+        if (ClaimTexts.blank(claim.getLogisticsNo()) && logistics.startsWith("SF")) {
+            claim.setLogisticsNo(logistics);
         }
     }
 
