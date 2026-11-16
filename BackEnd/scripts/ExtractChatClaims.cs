@@ -701,7 +701,6 @@ public class ExtractChatClaims
         string category = CategoryOf(body);
         string product = BestProduct(body);
         if (product.Length == 0) product = InferProduct(body, category);
-        if (product.Length == 0) product = category.Length > 0 ? category : "肉品";
         string symptom = SymptomOf(body);
         string brief = MakeBrief(product, category, symptom, substantive[0].Text);
         string type = TypeOf(body);
@@ -948,9 +947,8 @@ public class ExtractChatClaims
         if (HasAny(text, "礼盒", "礼品")) return "礼盒";
         if (HasAny(text, "开化", "涨袋", "化冻", "血水")) return category.Length > 0 ? category : "肉品";
         if (category.Length > 0) return category;
-        if (text.Contains("肉")) return "肉品";
         if (HasAny(text, "蔬菜", "青菜", "坏果", "水果")) return "蔬菜";
-        return "肉品";
+        return "";
     }
 
     static void LoadProductCatalog(List<Off> official)

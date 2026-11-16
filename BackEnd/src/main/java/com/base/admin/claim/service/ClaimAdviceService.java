@@ -2,6 +2,7 @@ package com.base.admin.claim.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.base.admin.claim.ClaimDingTalkBridge;
+import com.base.admin.claim.ClaimPaths;
 import com.base.admin.claim.domain.ClaimAdviceDecision;
 import com.base.admin.claim.domain.ClaimCase;
 import com.base.admin.claim.domain.ClaimMessage;
@@ -10,6 +11,7 @@ import com.base.admin.claim.dto.ClaimAdvicePageVO;
 import com.base.admin.claim.mapper.ClaimAdviceDecisionMapper;
 import com.base.admin.claim.mapper.ClaimCaseMapper;
 import com.base.admin.claim.mapper.ClaimMessageMapper;
+import com.base.admin.claim.support.ClaimConsumerLaw;
 import com.base.admin.claim.support.ClaimTexts;
 import com.base.admin.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
@@ -27,6 +29,7 @@ public class ClaimAdviceService {
     private final ClaimMessageMapper messageMapper;
     private final ClaimConversationService conversationService;
     private final ClaimDingTalkBridge dingTalkBridge;
+    private final ClaimPaths paths;
 
     public ClaimAdvicePageVO open(String token) {
         return pageOf(require(token));
@@ -126,6 +129,7 @@ public class ClaimAdviceService {
         vo.setSymptomCategory(claim.getSymptomCategory());
         vo.setProductGroup(claim.getProductGroup());
         vo.setRecommendation(claim.getRecommendation());
+        vo.setLaw(ClaimConsumerLaw.load(paths.historyDir()));
         vo.setDecision(claim.getAdviceDecision());
         vo.setHasRefs(!ClaimTexts.blank(claim.getReferenceView()));
         return vo;

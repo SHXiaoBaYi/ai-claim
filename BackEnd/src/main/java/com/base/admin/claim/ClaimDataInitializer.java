@@ -1,6 +1,7 @@
 package com.base.admin.claim;
 
 import com.base.admin.claim.service.ClaimArchiveService;
+import com.base.admin.claim.support.ClaimConsumerLaw;
 import com.base.admin.claim.service.ClaimFileStorage;
 import com.base.admin.claim.service.ClaimHistoryService;
 import com.base.admin.claim.service.ClaimSopService;
@@ -11,6 +12,8 @@ import org.springframework.boot.ApplicationRunner;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
+
+import java.nio.file.Path;
 
 @Slf4j
 @Component
@@ -38,5 +41,11 @@ public class ClaimDataInitializer implements ApplicationRunner {
         }
         historyService.fillSymptomCategories();
         archiveService.fillSymptomCategories();
+        Path lawFile = ClaimConsumerLaw.find(paths.historyDir());
+        if (lawFile == null) {
+            log.warn("没有消协法文件，建议只会使用内置分流：{}", paths.historyDir().toAbsolutePath());
+        } else {
+            log.info("消协法文件：{}", lawFile.toAbsolutePath());
+        }
     }
 }

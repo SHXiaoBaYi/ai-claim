@@ -154,7 +154,8 @@ public class ClaimHistoryService {
         } catch (IOException ex) {
             throw new BusinessException("读取历史案例失败");
         }
-        result.setMessage("新增 " + result.getInserted() + " 条，更新 " + result.getUpdated() + " 条，保留手工修改 " + result.getSkipped() + " 条");
+        result.setMessage("新增 " + result.getInserted() + " 条，更新 " + result.getUpdated() + " 条，保留手工修改 " + result.getSkipped()
+                + " 条，群聊无产品未入库 " + result.getDropped() + " 条");
         return result;
     }
 
@@ -180,6 +181,11 @@ public class ClaimHistoryService {
         String product = ClaimHistoryExcel.text(row, "产品名称");
         String brief = ClaimHistoryExcel.text(row, "投诉简述");
         if (ClaimTexts.blank(content) && ClaimTexts.blank(name) && ClaimTexts.blank(product) && ClaimTexts.blank(brief)) {
+            return;
+        }
+        // 群聊梳理认不出货品时会写成「肉品」。这不是产品，不入库。
+        if (fileName.contains("群聊") && placeholderProduct(product)) {
+            result.setDropped(result.getDropped() + 1);
             return;
         }
         String phone = ClaimTexts.phoneOf(name + " " + content);
@@ -280,6 +286,11 @@ public class ClaimHistoryService {
 
     private boolean changed(String previous, String submitted) {
         return !ClaimTexts.empty(previous).equals(ClaimTexts.empty(submitted));
+    }
+
+    private boolean placeholderProduct(String product) {
+        String value = ClaimTexts.empty(product).trim();
+        return value.isEmpty() || "肉品".equals(value) || "商品".equals(value);
     }
 
     private String dedupe(String year, String date, String phone, String name, String product, String brief) {

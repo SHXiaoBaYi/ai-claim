@@ -2,6 +2,7 @@ package com.base.admin.claim.controller;
 
 import com.base.admin.annotation.Log;
 import com.base.admin.annotation.RequiresPermission;
+import com.base.admin.claim.dto.ClaimLawVO;
 import com.base.admin.claim.dto.ClaimSopNodeVO;
 import com.base.admin.claim.dto.ClaimSopSaveDTO;
 import com.base.admin.claim.service.ClaimSopService;
@@ -28,6 +29,15 @@ import java.util.List;
 public class ClaimSopController {
 
     private final ClaimSopService sopService;
+
+    @Operation(summary = "消协法适用依据")
+    @GetMapping("/law")
+    @RequiresPermission("claim:sop:list")
+    public Result<ClaimLawVO> law() {
+        ClaimLawVO vo = new ClaimLawVO();
+        vo.setText(sopService.lawText());
+        return Result.ok(vo);
+    }
 
     @Operation(summary = "SOP 树")
     @GetMapping("/tree")

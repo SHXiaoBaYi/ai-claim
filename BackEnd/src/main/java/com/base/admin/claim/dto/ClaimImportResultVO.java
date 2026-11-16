@@ -16,6 +16,9 @@ public class ClaimImportResultVO {
     @Schema(description = "因手工修改而跳过的条数")
     private int skipped;
 
+    @Schema(description = "群聊没有真实产品、未入库的条数")
+    private int dropped;
+
     @Schema(description = "说明")
     private String message;
 }
