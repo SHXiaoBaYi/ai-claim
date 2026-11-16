@@ -40,6 +40,7 @@ const ClaimHistoryPage = memo(function ClaimHistoryPage() {
 
   const columns: ProColumnType<ClaimHistory>[] = [
     { title: '年份', dataIndex: 'sourceYear', width: 80 },
+    { title: '来源', dataIndex: 'sourceFile', width: 160, ellipsis: true, search: false },
     { title: '投诉日期', dataIndex: 'complaintDate', width: 120, search: false },
     { title: '顾客', dataIndex: 'customerName', width: 120, search: false },
     { title: '电话', dataIndex: 'customerPhone', width: 140, search: false },
@@ -95,7 +96,7 @@ const ClaimHistoryPage = memo(function ClaimHistoryPage() {
         ]}
         tableExtraRender={() => (
           <div className='mb-3 text-sm text-neutral-500'>
-            三年客诉作为建议依据。出建议时先按现象大类缩小范围，再对照这一类的案例和档案。手工改过的案例，重新导入时会保留。
+            三年客诉表和「群聊客诉梳理」都会入库，来源文件可在列表里区分。出建议时先按现象大类缩小范围，再对照这一类的案例和档案。手工改过的案例，重新导入时会保留。
           </div>
         )}
       />

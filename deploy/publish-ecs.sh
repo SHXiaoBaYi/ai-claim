@@ -123,6 +123,39 @@ fi
 echo "==> 上传后端 jar"
 scp_file "$JAR" "$REMOTE:$ECS_DIR/base-admin-1.0.0.jar"
 
+echo "==> 上传历史案例 Excel / 消协法（不含群聊原文导出）"
+ssh_run "mkdir -p '$ECS_DIR/docs'"
+DOCS_STAGE="$(mktemp -d "${TMPDIR:-/tmp}/xby-claim-docs.XXXXXX")"
+cleanup_docs_stage() { rm -rf "$DOCS_STAGE"; }
+trap cleanup_docs_stage EXIT
+copied=0
+shopt -s nullglob
+for f in "$ROOT/docs"/*; do
+  [ -f "$f" ] || continue
+  base="$(basename "$f")"
+  case "$base" in
+    .~*) continue ;;
+    *跟进群*) continue ;;
+    *客诉*.xlsx|*消协*.docx|*消协*.doc)
+      cp "$f" "$DOCS_STAGE/"
+      copied=$((copied + 1))
+      echo "    $base"
+      ;;
+  esac
+done
+shopt -u nullglob
+if [[ "$copied" -lt 1 ]]; then
+  echo "docs 里没有可上传的客诉表或消协法，群聊结构化案例不会入库" >&2
+else
+  if [[ -n "${SSHPASS:-}" ]] && command -v sshpass >/dev/null 2>&1 && [[ -z "${ECS_IDENTITY:-}" ]]; then
+    COPYFILE_DISABLE=1 tar --disable-copyfile --no-xattrs -C "$DOCS_STAGE" -czf - . \
+      | sshpass -e ssh "${SSH_OPTS[@]}" "$REMOTE" "tar -C '$ECS_DIR/docs' -xzf -"
+  else
+    COPYFILE_DISABLE=1 tar --disable-copyfile --no-xattrs -C "$DOCS_STAGE" -czf - . \
+      | ssh "${SSH_OPTS[@]}" "$REMOTE" "tar -C '$ECS_DIR/docs' -xzf -"
+  fi
+fi
+
 echo "==> 上传 nginx / systemd"
 scp_file "$NGINX_SRC" "$REMOTE:/etc/nginx/conf.d/xby-admin.conf"
 scp_file "$UNIT_SRC" "$REMOTE:/etc/systemd/system/xby-admin.service"

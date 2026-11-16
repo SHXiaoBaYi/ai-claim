@@ -52,7 +52,7 @@ xby:
   claim:
     # 对话里的照片、视频。相对路径按后端启动目录解析，默认落到仓库根目录 data-docs
     data-docs: ${CLAIM_DATA_DOCS:../data-docs}
-    # 三年客诉 Excel 所在目录，首次启动导入历史案例
+    # 客诉 Excel 所在目录。本机从 BackEnd 启动默认 ../docs；ECS 发布到 /opt/xby-admin/docs
     history-dir: ${CLAIM_HISTORY_DIR:../docs}
     # 钉钉里「查看历史参照案例」打开的站点根地址
     public-base-url: ${CLAIM_PUBLIC_BASE:http://47.103.191.164}

@@ -22,6 +22,7 @@ public class ClaimDataInitializer implements ApplicationRunner {
     private final ClaimSopService sopService;
     private final ClaimHistoryService historyService;
     private final ClaimArchiveService archiveService;
+    private final ClaimPaths paths;
 
     @Override
     public void run(ApplicationArguments args) {
@@ -33,7 +34,7 @@ public class ClaimDataInitializer implements ApplicationRunner {
             historyService.importIfEmpty();
             historyService.importMissing();
         } catch (Exception ex) {
-            log.warn("历史案例尚未导入：{}", ex.getMessage());
+            log.warn("历史案例尚未导入（{}）：{}", paths.historyDir().toAbsolutePath(), ex.getMessage());
         }
         historyService.fillSymptomCategories();
         archiveService.fillSymptomCategories();

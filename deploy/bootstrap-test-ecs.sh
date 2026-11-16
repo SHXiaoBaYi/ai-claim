@@ -7,7 +7,7 @@ set -euo pipefail
 
 ECS_DIR="${ECS_DIR:-/opt/xby-admin}"
 echo "==> 目录 ${ECS_DIR}"
-mkdir -p "$ECS_DIR/html" "$ECS_DIR/config" "$ECS_DIR/uploads"
+mkdir -p "$ECS_DIR/html" "$ECS_DIR/config" "$ECS_DIR/uploads" "$ECS_DIR/docs"
 
 if ! command -v java >/dev/null 2>&1; then
   echo "==> 安装 Java 21"

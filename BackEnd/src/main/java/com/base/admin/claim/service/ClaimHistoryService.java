@@ -119,9 +119,7 @@ public class ClaimHistoryService {
             return;
         }
         ClaimImportResultVO result = importFromDocs(true);
-        if (result.getInserted() > 0) {
-            log.info("已补历史案例：{}", result.getMessage());
-        }
+        log.info("补历史案例：{}", result.getMessage());
     }
 
     @Transactional
@@ -143,6 +141,12 @@ public class ClaimHistoryService {
             }).sorted().toList();
             if (excels.isEmpty()) {
                 throw new BusinessException("目录里没有客诉 Excel：" + dir);
+            }
+            log.info("历史案例从 {} 导入 {} 个文件：{}", dir.toAbsolutePath(), excels.size(),
+                    excels.stream().map(path -> path.getFileName().toString()).toList());
+            boolean hasChat = excels.stream().anyMatch(path -> path.getFileName().toString().contains("群聊"));
+            if (!hasChat) {
+                log.warn("没有群聊客诉梳理表，钉钉群结构化案例不会入库：{}", dir.toAbsolutePath());
             }
             for (Path file : excels) {
                 importFile(file, result, insertOnly);
