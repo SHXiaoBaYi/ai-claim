@@ -1,8 +1,8 @@
-import { memo, useEffect, useRef, useState } from 'react';
+import { memo, useRef, useState } from 'react';
 import type { ActionType, ProColumnType } from '@ant-design/pro-components';
 import { App, Button, Form, Input, InputNumber, Modal, Select } from 'antd';
 import BaseProTable from '@/components/BaseProTable';
-import { deleteClaimSopApi, getClaimLawApi, getClaimSopTreeApi, saveClaimSopApi, type ClaimSopNode } from '@/api/claim';
+import { deleteClaimSopApi, getClaimSopTreeApi, saveClaimSopApi, type ClaimSopNode } from '@/api/claim';
 
 const ClaimSopPage = memo(function ClaimSopPage() {
   const { message } = App.useApp();
@@ -11,13 +11,6 @@ const ClaimSopPage = memo(function ClaimSopPage() {
   const [saving, setSaving] = useState(false);
   const [creating, setCreating] = useState(false);
   const [form] = Form.useForm<ClaimSopNode>();
-  const [law, setLaw] = useState('');
-
-  useEffect(() => {
-    getClaimLawApi()
-      .then((data) => setLaw(data.text || ''))
-      .catch(() => setLaw(''));
-  }, []);
 
   const edit = (row?: ClaimSopNode, parentCode?: string) => {
     setCreating(!row);
@@ -116,16 +109,6 @@ const ClaimSopPage = memo(function ClaimSopPage() {
           const data = await getClaimSopTreeApi();
           return { data, success: true };
         }}
-        tableExtraRender={() =>
-          law ? (
-            <section className='mb-3 rounded-lg bg-white p-4'>
-              <h2 className='text-sm font-medium text-neutral-900'>消协法适用依据</h2>
-              <pre className='mt-2 max-h-80 overflow-auto text-sm leading-6 whitespace-pre-wrap text-neutral-700'>
-                {law}
-              </pre>
-            </section>
-          ) : null
-        }
         toolBarRender={() => [
           <Button
             key='add'

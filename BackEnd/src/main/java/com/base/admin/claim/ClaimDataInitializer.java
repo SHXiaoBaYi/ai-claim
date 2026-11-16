@@ -1,6 +1,7 @@
 package com.base.admin.claim;
 
 import com.base.admin.claim.service.ClaimArchiveService;
+import com.base.admin.claim.service.ClaimLawService;
 import com.base.admin.claim.support.ClaimConsumerLaw;
 import com.base.admin.claim.service.ClaimFileStorage;
 import com.base.admin.claim.service.ClaimHistoryService;
@@ -25,11 +26,13 @@ public class ClaimDataInitializer implements ApplicationRunner {
     private final ClaimSopService sopService;
     private final ClaimHistoryService historyService;
     private final ClaimArchiveService archiveService;
+    private final ClaimLawService lawService;
     private final ClaimPaths paths;
 
     @Override
     public void run(ApplicationArguments args) {
         fileStorage.ensureRoot();
+        lawService.seedFromFile();
         sopService.seedIfEmpty();
         sopService.patchKeywordTraps();
         sopService.ensureCatalogNodes();

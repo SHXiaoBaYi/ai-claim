@@ -1,13 +1,11 @@
 package com.base.admin.claim.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.base.admin.claim.ClaimPaths;
 import com.base.admin.claim.domain.ClaimCase;
 import com.base.admin.claim.domain.ClaimSopNode;
 import com.base.admin.claim.dto.ClaimSopNodeVO;
 import com.base.admin.claim.dto.ClaimSopSaveDTO;
 import com.base.admin.claim.mapper.ClaimSopNodeMapper;
-import com.base.admin.claim.support.ClaimConsumerLaw;
 import com.base.admin.claim.support.ClaimSopCatalog;
 import com.base.admin.claim.support.ClaimTexts;
 import com.base.admin.exception.BusinessException;
@@ -26,11 +24,6 @@ import java.util.Map;
 public class ClaimSopService {
 
     private final ClaimSopNodeMapper sopNodeMapper;
-    private final ClaimPaths paths;
-
-    public String lawText() {
-        return ClaimConsumerLaw.load(paths.historyDir());
-    }
 
     public List<ClaimSopNodeVO> tree() {
         List<ClaimSopNode> nodes = all();

@@ -54,6 +54,7 @@ public class ClaimConversationService {
     private final ClaimPhenomenonNli phenomenonNli;
     private final ClaimProperties claimProperties;
     private final ClaimPaths paths;
+    private final ClaimLawService lawService;
     private final AiChatService aiChatService;
     private final ObjectMapper objectMapper;
     private final ThreadLocal<List<ClaimAction>> pendingActions = new ThreadLocal<>();
@@ -753,7 +754,7 @@ public class ClaimConversationService {
     }
 
     public String consumerLaw() {
-        return ClaimConsumerLaw.load(paths.historyDir());
+        return lawService.text();
     }
 
     /** 钉钉和综合建议页要能看见消协法，不把法条写进给顾客的话术段。 */

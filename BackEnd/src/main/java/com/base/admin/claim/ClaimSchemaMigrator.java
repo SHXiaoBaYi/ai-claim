@@ -187,7 +187,9 @@ public class ClaimSchemaMigrator implements ApplicationRunner {
                 (305, '历史案例', 300, 3, 'history', 'claim/history/index', 'C', 'claim:history:list', 'BookOutlined', 0, 0, '查看和编辑历史案例', 1),
                 (306, '案例编辑', 305, 1, '', '', 'F', 'claim:history:edit', '#', 0, 0, '', 1),
                 (307, '理赔机器人', 300, 4, 'robot', 'claim/robot/index', 'C', 'claim:robot:list', 'RobotOutlined', 0, 0, '单独的理赔机器人凭证', 1),
-                (308, '机器人编辑', 307, 1, '', '', 'F', 'claim:robot:edit', '#', 0, 0, '', 1)
+                (308, '机器人编辑', 307, 1, '', '', 'F', 'claim:robot:edit', '#', 0, 0, '', 1),
+                (309, '消协法', 300, 5, 'law', 'claim/law/index', 'C', 'claim:law:list', 'ReadOutlined', 0, 0, '在线编辑消协法，综合建议按这份依据写', 1),
+                (310, '消协法编辑', 309, 1, '', '', 'F', 'claim:law:edit', '#', 0, 0, '', 1)
                 ON DUPLICATE KEY UPDATE
                   menu_name = VALUES(menu_name),
                   parent_id = VALUES(parent_id),
@@ -204,7 +206,7 @@ public class ClaimSchemaMigrator implements ApplicationRunner {
                 INSERT IGNORE INTO sys_role_menu (role_id, menu_id, is_active)
                 SELECT r.role_id, m.menu_id, 1
                 FROM sys_role r
-                JOIN sys_menu m ON m.menu_id BETWEEN 300 AND 308
+                JOIN sys_menu m ON m.menu_id BETWEEN 300 AND 310
                 WHERE r.is_active = 1
                 """);
         jdbc.execute("ALTER TABLE claim_case MODIFY similar_case_ids VARCHAR(2000) NOT NULL DEFAULT ''");
@@ -259,6 +261,18 @@ public class ClaimSchemaMigrator implements ApplicationRunner {
                   KEY idx_claim_advice_case (case_id),
                   KEY idx_claim_advice_scope (symptom_category, product_group, decision)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='综合建议人工处理'
+                """);
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS claim_consumer_law (
+                  id           BIGINT       NOT NULL,
+                  content      MEDIUMTEXT,
+                  create_by    VARCHAR(50)  DEFAULT '',
+                  create_time  DATETIME     DEFAULT CURRENT_TIMESTAMP,
+                  update_by    VARCHAR(50)  DEFAULT '',
+                  update_time  DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                  is_active    TINYINT      NOT NULL DEFAULT 1,
+                  PRIMARY KEY (id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='消协法适用依据'
                 """);
         log.info("理赔档案、SOP、历史案例表与菜单已同步");
     }

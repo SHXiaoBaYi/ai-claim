@@ -155,7 +155,11 @@ export function getClaimSopTreeApi() {
 }
 
 export function getClaimLawApi() {
-  return request.get<unknown, { text?: string }>('/claim/sop/law');
+  return request.get<unknown, { text?: string }>('/claim/law');
+}
+
+export function saveClaimLawApi(text: string) {
+  return request.put('/claim/law', { text });
 }
 
 export function saveClaimSopApi(data: Partial<ClaimSopNode> & { id?: number }, creating: boolean) {
