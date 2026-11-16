@@ -19,6 +19,7 @@ public class ExtractChatClaims
     static readonly Regex NamePhoneRe = new Regex(@"(?<![\u4e00-\u9fa5])([\u4e00-\u9fa5]{2,4})[\s:：,，、]{0,3}(?<!\d)(1[3-9]\d{9})(?!\d)");
     static readonly Regex StoreRe = new Regex(@"[\u4e00-\u9fa5A-Za-z0-9]{2,16}(?:门店|店)");
     static readonly Regex ProductLabelRe = new Regex(@"(?:货品|产品|品名|商品|单品)\s*[:：]\s*([^\n，,。；;]{2,40})");
+    static readonly Regex StaffProductRe = new Regex(@"购买产品(?:名称)?(?:及数量)?\s*[:：]\s*(.+?)(?=\s+\d+[:.：]|，单号|$|\n)");
     static readonly Regex MonthDayRe = new Regex(@"(\d{1,2})\s*月\s*(\d{1,2})\s*日");
     static readonly Regex IsoDateRe = new Regex(@"\d{4}-\d{2}-\d{2}");
 
@@ -51,11 +52,15 @@ public class ExtractChatClaims
     };
 
     static readonly string[] Products = new string[] {
-        "手把肉", "羊排", "羊腿", "羊肉卷", "羊蝎子", "羊肝", "羊肚", "羊肉串", "羊肉",
-        "牛腩", "牛腱", "肥牛", "牛舌", "牛排", "里脊", "牛筋", "牛肉",
-        "鸡腿", "鸡肉", "鸽子", "鸭肉", "马肠", "烤肠",
-        "有机菜", "蔬菜", "水果", "草莓", "包子", "大盘鸡"
+        "冰碴驹俐", "戈壁冬羔尝鲜版", "戈壁冬羔", "冬羔", "小羯羊全羊", "乳羔羊全羊", "南疆乳羔羊", "阿勒泰大尾羊", "精品礼盒", "有机蔬菜",
+        "手把肉", "羊排卷", "羊肉卷", "羊蝎子", "羊前腿", "羊后腿", "羊腿", "羊排", "羊肝", "羊肚", "羊肉串",
+        "小羯羊", "乳羔羊", "驹俐", "全羊",
+        "牛腩", "牛腱", "肥牛", "牛舌", "牛排", "里脊", "牛筋", "牛肋条", "腱子心", "金钱腱", "腱子",
+        "鸡腿", "土鸡", "鸽子", "鸭肉", "马肠", "烤肠", "有机菜", "大盘鸡", "包子", "草莓",
+        "羊肉", "牛肉", "鸡肉", "礼盒", "蔬菜", "水果"
     };
+
+    static List<string> ProductCatalog = new List<string>();
 
     static readonly string[] SymptomWords = new string[] {
         "严重开化", "轻微开化", "开化", "异味", "膻味", "腥味", "变质", "不新鲜", "发臭", "发黑",
@@ -71,6 +76,8 @@ public class ExtractChatClaims
         public string Text = "";
         public string QuoteSender = "";
         public string QuoteTime = "";
+        public string QuoteText = "";
+        public int QuoteIndex = -1;
         public string Id = "";
         public List<string> Phones = new List<string>();
         public List<string> Names = new List<string>();
@@ -83,6 +90,7 @@ public class ExtractChatClaims
         public DateTime? Date;
         public string RawDate = "";
         public string Name = "";
+        public string Product = "";
         public List<string> Phones = new List<string>();
     }
 
@@ -219,7 +227,7 @@ public class ExtractChatClaims
         HashSet<string> stops = new HashSet<string>(StopNames);
         foreach (Msg msg in msgs)
         {
-            msg.Names = ExtractNames(msg.Text, staff, stops);
+            msg.Names = ExtractNames(msg.Text + "\n" + msg.QuoteText, staff, stops);
             msg.Ack = IsAck(msg.Text);
             msg.Claim = IsClaim(msg.Text);
         }
@@ -246,6 +254,8 @@ public class ExtractChatClaims
         Console.WriteLine("official=" + official.Count + " y2024=" + off2024 + " y2025=" + off2025 + " y2026=" + off2026);
         if (off2024 < 50 || off2025 < 300 || off2026 < 100)
             throw new Exception("official cases look incomplete");
+        LoadProductCatalog(official);
+        Console.WriteLine("products=" + ProductCatalog.Count);
 
         List<List<int>> groups = Cluster(msgs, hotPhones);
         List<Row> kept = new List<Row>();
@@ -304,8 +314,9 @@ public class ExtractChatClaims
             msg.Text = Cell(row, "D");
             msg.QuoteSender = Cell(row, "E");
             msg.QuoteTime = Cell(row, "F");
+            msg.QuoteText = Cell(row, "G");
             msg.Id = Cell(row, "J");
-            foreach (Match match in PhoneRe.Matches(msg.Text + " " + Cell(row, "G")))
+            foreach (Match match in PhoneRe.Matches(msg.Text + " " + msg.QuoteText + " " + Cell(row, "I")))
                 AddPhone(msg, match.Value);
             msgs.Add(msg);
         }
@@ -498,27 +509,26 @@ public class ExtractChatClaims
         }
 
         Dictionary<string, List<int>> byKey = new Dictionary<string, List<int>>();
+        Dictionary<string, List<int>> byTime = new Dictionary<string, List<int>>();
         for (int i = 0; i < n; i++)
         {
-            string key = msgs[i].Sender + "|" + msgs[i].Time.ToString("yyyy-MM-dd HH:mm:ss");
-            List<int> list;
-            if (!byKey.TryGetValue(key, out list))
-            {
-                list = new List<int>();
-                byKey[key] = list;
-            }
-            list.Add(i);
+            string time = msgs[i].Time.ToString("yyyy-MM-dd HH:mm:ss");
+            IndexMsg(byKey, msgs[i].Sender + "|" + time, i);
+            string senderKey = SenderKey(msgs[i].Sender);
+            if (senderKey.Length > 0 && senderKey != msgs[i].Sender)
+                IndexMsg(byKey, senderKey + "|" + time, i);
+            IndexMsg(byTime, time, i);
         }
+        int quoteHits = 0;
         for (int i = 0; i < n; i++)
         {
-            if (msgs[i].QuoteSender.Length == 0 || msgs[i].QuoteTime.Length == 0) continue;
-            DateTime quoted;
-            if (!TryTime(msgs[i].QuoteTime, out quoted)) continue;
-            string key = msgs[i].QuoteSender + "|" + quoted.ToString("yyyy-MM-dd HH:mm:ss");
-            List<int> list;
-            if (!byKey.TryGetValue(key, out list)) continue;
-            uf.Union(i, list[0], false);
+            int quoted = FindQuoted(msgs, byKey, byTime, msgs[i]);
+            if (quoted < 0) continue;
+            msgs[i].QuoteIndex = quoted;
+            uf.Union(i, quoted, true);
+            quoteHits++;
         }
+        Console.WriteLine("quoteLinks=" + quoteHits);
 
         Dictionary<string, List<int>> byPhone = new Dictionary<string, List<int>>();
         for (int i = 0; i < n; i++)
@@ -579,8 +589,9 @@ public class ExtractChatClaims
             if (uf.Conflicts(i, i - 1)) continue;
             bool burst = msgs[i].Sender == msgs[i - 1].Sender && minutes <= 4 && msgs[i].Phones.Count == 0;
             bool ack = msgs[i].Ack && minutes <= 8;
-            bool thisOrder = minutes <= 20 && (msgs[i].Text.Contains("此单") || msgs[i].Text.Contains("这条") || msgs[i].Text.Contains("这个单"));
-            if (burst || ack || thisOrder) uf.Union(i, i - 1, false);
+            bool thisOrder = minutes <= 25 && HasAny(msgs[i].Text, "此单", "这条", "这个单", "该单", "上一单", "上面那个");
+            bool sameQuote = msgs[i].QuoteIndex >= 0 && msgs[i].QuoteIndex == msgs[i - 1].QuoteIndex;
+            if (burst || ack || thisOrder || sameQuote) uf.Union(i, i - 1, false);
         }
 
         Dictionary<int, List<int>> groups = new Dictionary<int, List<int>>();
@@ -633,8 +644,9 @@ public class ExtractChatClaims
         {
             double gap = (msgs[group[i]].Time - msgs[group[i - 1]].Time).TotalDays;
             double curSpan = (msgs[group[i]].Time - msgs[cur[0]].Time).TotalDays;
+            bool quotedHere = msgs[group[i]].QuoteIndex >= 0 && cur.Contains(msgs[group[i]].QuoteIndex);
             bool different = DifferentPeople(msgs[group[i - 1]], msgs[group[i]]);
-            if ((different && gap > 0.5) || ((curSpan > 21 || cur.Count > 45) && gap > 2))
+            if (!quotedHere && ((different && gap > 0.5) || ((curSpan > 21 || cur.Count > 45) && gap > 2)))
             {
                 parts.Add(cur);
                 cur = new List<int>();
@@ -658,6 +670,8 @@ public class ExtractChatClaims
             {
                 substantive.Add(msg);
                 all.Append(msg.Text).Append('\n');
+                if (msg.QuoteText.Length > 0 && msg.QuoteText != "[加密消息，无法解码]" && msg.QuoteText != "[图片]" && msg.QuoteText != "[视频]")
+                    all.Append(msg.QuoteText).Append('\n');
             }
             foreach (string itemPhone in msg.Phones)
             {
@@ -684,8 +698,10 @@ public class ExtractChatClaims
         if (staff.Contains(name)) name = "";
         string body = StripPhones(blob, hotPhones);
         string store = BestStore(body);
-        string product = BestProduct(body);
         string category = CategoryOf(body);
+        string product = BestProduct(body);
+        if (product.Length == 0) product = InferProduct(body, category);
+        if (product.Length == 0) product = category.Length > 0 ? category : "肉品";
         string symptom = SymptomOf(body);
         string brief = MakeBrief(product, category, symptom, substantive[0].Text);
         string type = TypeOf(body);
@@ -751,6 +767,13 @@ public class ExtractChatClaims
             line = StripPhones(line, hotPhones);
             if (line.Length == 0) continue;
             text.Append(msg.Time.ToString("MM-dd HH:mm")).Append(' ').Append(msg.Sender).Append('：').Append(Clip(line, 160)).Append('\n');
+            if (msg.QuoteText.Length > 0 && msg.QuoteText != "[加密消息，无法解码]")
+            {
+                string quoted = CleanMentions(msg.QuoteText);
+                quoted = StripPhones(quoted, hotPhones);
+                if (quoted.Length > 0)
+                    text.Append("  引用").Append(msg.QuoteSender).Append('：').Append(Clip(quoted, 140)).Append('\n');
+            }
         }
         return Clip(text.ToString().Trim(), 2500);
     }
@@ -840,15 +863,164 @@ public class ExtractChatClaims
     static string BestProduct(string text)
     {
         if (text == null) text = "";
-        Match labeled = ProductLabelRe.Match(text);
-        if (labeled.Success) return labeled.Groups[1].Value.Trim();
-        List<string> found = new List<string>();
-        foreach (string product in Products)
+        Match staff = StaffProductRe.Match(text);
+        if (staff.Success)
         {
-            if (text.Contains(product) && !found.Contains(product)) found.Add(product);
-            if (found.Count >= 3) break;
+            string staffValue = staff.Groups[1].Value;
+            staffValue = Regex.Replace(staffValue, @"[，,].*$", "");
+            staffValue = Regex.Replace(staffValue, @"^\d+件", "");
+            staffValue = Regex.Replace(staffValue, @"\d+件$", "");
+            staffValue = CleanProduct(staffValue);
+            if (staffValue.Length >= 2) return staffValue;
         }
-        return string.Join("、", found.ToArray());
+        Match labeled = ProductLabelRe.Match(text);
+        if (labeled.Success)
+        {
+            string labeledValue = CleanProduct(labeled.Groups[1].Value);
+            if (labeledValue.Length >= 2) return labeledValue;
+        }
+        Match bought = Regex.Match(text, @"(?:买的|买了|购买的|购买了)([^\n，,。；;]{2,16})");
+        if (bought.Success)
+        {
+            string boughtValue = CleanProduct(bought.Groups[1].Value);
+            string hit = CatalogHit(boughtValue);
+            if (hit.Length >= 2) return hit;
+            if (UsefulProduct(boughtValue)) return boughtValue;
+        }
+        string best = "";
+        foreach (string product in ProductCatalog)
+        {
+            if (product.Length >= 2 && text.Contains(product) && product.Length > best.Length)
+                best = product;
+        }
+        return best;
+    }
+
+    static string CleanProduct(string value)
+    {
+        if (value == null) return "";
+        value = value.Trim().Trim('：', ':', '，', ',', '。');
+        value = Regex.Replace(value, @"^(货品|产品|品名|商品)\s*", "");
+        if (value.Length > 20) value = value.Substring(0, 20);
+        if (value == "货品" || value == "产品" || value == "商品" || value == "肉" || value == "菜" || value == "一件" || value == "两件")
+            return "";
+        if (Regex.IsMatch(value, @"^\d") || Regex.IsMatch(value, @"^[一二两三四五六七八九十]+件$")) return "";
+        return value;
+    }
+
+    static bool UsefulProduct(string name)
+    {
+        if (name == null) return false;
+        name = name.Trim();
+        if (name.Length < 2 || name.Length > 16) return false;
+        if (Regex.IsMatch(name, @"^\d") || Regex.IsMatch(name, @"^[一二两三四五六七八九十百]+件$") || name == "一件" || name == "两件")
+            return false;
+        string[] bad = new string[] {
+            "货品", "产品", "商品", "订单", "理赔", "顺丰", "基金", "运费", "顾客", "客户", "处理",
+            "补发", "退款", "此单", "如果", "领导", "照片", "视频", "附件", "小票"
+        };
+        foreach (string item in bad) if (name == item || name.Contains(item)) return false;
+        return HasAny(name, "羊", "牛", "鸡", "鸽", "鸭", "菜", "果", "肉", "肠", "排", "腿", "卷", "蝎",
+            "盒", "馅", "鱼", "虾", "菌", "瓜", "椒", "萝", "包", "肝", "肚", "筋", "腱", "腩", "串",
+            "驹", "羯", "羔", "礼", "饼", "饺", "锅", "肋", "里脊", "肥牛", "火锅", "草莓", "戈壁");
+    }
+
+    static string CatalogHit(string value)
+    {
+        foreach (string product in ProductCatalog)
+        {
+            if (product.Length >= 2 && value.Contains(product)) return product;
+        }
+        return "";
+    }
+
+    static string InferProduct(string text, string category)
+    {
+        if (HasAny(text, "坏果", "坏菜", "有机菜", "有机蔬菜")) return "有机蔬菜";
+        if (text.Contains("马肠")) return "马肠";
+        if (text.Contains("烤肠")) return "烤肠";
+        if (HasAny(text, "羊排", "太肥", "油脂", "肥瘦")) return "羊排";
+        if (HasAny(text, "羊蝎", "蝎子")) return "羊蝎子";
+        if (HasAny(text, "乳羔")) return "乳羔羊";
+        if (HasAny(text, "小羯", "羯羊")) return "小羯羊";
+        if (HasAny(text, "驹俐", "冰碴")) return "冰碴驹俐";
+        if (HasAny(text, "膻", "腥") && !text.Contains("牛")) return "羊肉";
+        if (HasAny(text, "礼盒", "礼品")) return "礼盒";
+        if (HasAny(text, "开化", "涨袋", "化冻", "血水")) return category.Length > 0 ? category : "肉品";
+        if (category.Length > 0) return category;
+        if (text.Contains("肉")) return "肉品";
+        if (HasAny(text, "蔬菜", "青菜", "坏果", "水果")) return "蔬菜";
+        return "肉品";
+    }
+
+    static void LoadProductCatalog(List<Off> official)
+    {
+        HashSet<string> set = new HashSet<string>();
+        foreach (string product in Products) if (product.Length >= 2) set.Add(product);
+        foreach (Off off in official)
+        {
+            string name = (off.Product ?? "").Trim();
+            if (UsefulProduct(name)) set.Add(name);
+            foreach (string piece in name.Split(new char[] { '、', '/', '，', ',', ' ' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (UsefulProduct(piece.Trim())) set.Add(piece.Trim());
+            }
+        }
+        ProductCatalog = new List<string>(set);
+        ProductCatalog.Sort(delegate (string a, string b) { return b.Length.CompareTo(a.Length); });
+    }
+
+    static string SenderKey(string sender)
+    {
+        if (sender == null) return "";
+        return sender.Replace("停用", "").Replace("已离职", "").Replace("（已离职）", "").Trim();
+    }
+
+    static void IndexMsg(Dictionary<string, List<int>> map, string key, int index)
+    {
+        if (key == null || key.Length == 0) return;
+        List<int> list;
+        if (!map.TryGetValue(key, out list))
+        {
+            list = new List<int>();
+            map[key] = list;
+        }
+        list.Add(index);
+    }
+
+    static int FindQuoted(List<Msg> msgs, Dictionary<string, List<int>> byKey, Dictionary<string, List<int>> byTime, Msg msg)
+    {
+        if (msg.QuoteSender.Length == 0 || msg.QuoteTime.Length == 0) return -1;
+        DateTime quoted;
+        if (!TryTime(msg.QuoteTime, out quoted)) return -1;
+        string[] senders = new string[] { msg.QuoteSender, SenderKey(msg.QuoteSender) };
+        for (int delta = 0; delta <= 2; delta++)
+        {
+            int[] offsets = delta == 0 ? new int[] { 0 } : new int[] { -delta, delta };
+            foreach (int offset in offsets)
+            {
+                string time = quoted.AddSeconds(offset).ToString("yyyy-MM-dd HH:mm:ss");
+                foreach (string sender in senders)
+                {
+                    if (sender.Length == 0) continue;
+                    List<int> list;
+                    if (!byKey.TryGetValue(sender + "|" + time, out list)) continue;
+                    foreach (int i in list) if (i >= 0) return i;
+                }
+            }
+        }
+        List<int> atTime;
+        if (byTime.TryGetValue(quoted.ToString("yyyy-MM-dd HH:mm:ss"), out atTime))
+        {
+            string want = SenderKey(msg.QuoteSender);
+            foreach (int i in atTime)
+            {
+                string got = SenderKey(msgs[i].Sender);
+                if (got == want || (want.Length >= 2 && (got.Contains(want) || want.Contains(got))))
+                    return i;
+            }
+        }
+        return -1;
     }
 
     static string CategoryOf(string text)
@@ -858,7 +1030,7 @@ public class ExtractChatClaims
         bool sheep = text.Contains("羊");
         bool cow = text.Contains("牛");
         bool bird = HasAny(text, "鸡", "鸽", "鸭");
-        bool veg = HasAny(text, "蔬", "水果", "黄瓜", "白菜", "西红柿", "草莓", "菌", "菜");
+        bool veg = HasAny(text, "蔬菜", "有机菜", "水果", "黄瓜", "白菜", "西红柿", "草莓", "坏果", "坏菜");
         if (bird && !sheep && !cow) return "禽类";
         if (veg && !sheep && !cow && !text.Contains("肉")) return "蔬菜";
         if (sheep && !cow) return "羊肉";
@@ -1144,6 +1316,7 @@ public class ExtractChatClaims
             if (content.Length == 0 && customer.Length == 0 && product.Length == 0 && brief.Length == 0) continue;
             Off off = new Off();
             off.Name = customer;
+            off.Product = product;
             off.RawDate = HeaderValue(header, rows[i], "投诉日期");
             off.Date = ParseLoose(off.RawDate, year);
             if ((year == "2024" || year == "2025") && off.Date.HasValue && off.Date.Value.Year.ToString() != year)
@@ -1214,8 +1387,11 @@ public class ExtractChatClaims
             years[year] = n + 1;
         }
         StringBuilder text = new StringBuilder();
+        int emptyProduct = 0;
+        foreach (Row row in kept) if (row.Product == null || row.Product.Length == 0) emptyProduct++;
         text.Append("kept=").Append(kept.Count).Append(" noise=").Append(noise).Append(" dup=").Append(dup)
-            .Append(" groups=").Append(groups).Append(" split=").Append(splitExtra).Append(" hot=").Append(hotPhones.Count).Append('\n');
+            .Append(" groups=").Append(groups).Append(" split=").Append(splitExtra).Append(" hot=").Append(hotPhones.Count)
+            .Append(" emptyProduct=").Append(emptyProduct).Append('\n');
         foreach (KeyValuePair<string, int> pair in years)
             text.Append(pair.Key).Append('=').Append(pair.Value).Append('\n');
         string[] want = new string[] { "2022", "2023", "2024", "2025", "2026" };
