@@ -20,6 +20,7 @@ class ClaimConsumerLawTest {
         }
         assertTrue(Files.isDirectory(docs), "docs 目录应存在");
         String text = ClaimConsumerLaw.load(docs);
+        assertTrue(text.contains("冰碴驹俐"), text);
         assertTrue(text.contains("第五十五条") || text.contains("退一赔三"), text);
         assertTrue(text.contains("148") || text.contains("退一赔十"), text);
         assertTrue(text.contains("保底"), text);

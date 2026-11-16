@@ -154,6 +154,10 @@ export function getClaimSopTreeApi() {
   return request.get<unknown, ClaimSopNode[]>('/claim/sop/tree');
 }
 
+export function getClaimLawApi() {
+  return request.get<unknown, { text?: string }>('/claim/sop/law');
+}
+
 export function saveClaimSopApi(data: Partial<ClaimSopNode> & { id?: number }, creating: boolean) {
   return creating ? request.post('/claim/sop', data) : request.put('/claim/sop', data);
 }
@@ -235,6 +239,7 @@ export type ClaimAdvicePage = {
   symptomCategory?: string;
   productGroup?: string;
   recommendation?: string;
+  law?: string;
   decision?: string;
   hasRefs?: boolean;
 };

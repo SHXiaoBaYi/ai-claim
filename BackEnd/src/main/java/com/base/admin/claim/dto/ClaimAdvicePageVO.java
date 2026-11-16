@@ -25,6 +25,9 @@ public class ClaimAdvicePageVO {
     @Schema(description = "当前综合建议")
     private String recommendation;
 
+    @Schema(description = "消协法适用依据")
+    private String law;
+
     @Schema(description = "最近一次处理：ADOPTED / REDO / PARTIAL")
     private String decision;
 

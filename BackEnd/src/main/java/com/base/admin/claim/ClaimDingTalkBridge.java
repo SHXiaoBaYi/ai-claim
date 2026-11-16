@@ -156,7 +156,7 @@ public class ClaimDingTalkBridge implements ApplicationRunner {
         String webhook = message == null ? "" : message.getSessionWebhook();
         WaitingPace pace = new WaitingPace(webhook);
         try {
-            String reply = conversationService.handle(toInbound(message), pace);
+            String reply = conversationService.adviceWithLaw(conversationService.handle(toInbound(message), pace));
             List<ClaimConversationService.ClaimAction> actions = conversationService.takeActions();
             if (!actions.isEmpty()) {
                 sendCard(webhook, reply, actions);
@@ -307,12 +307,13 @@ public class ClaimDingTalkBridge implements ApplicationRunner {
         if (claim == null || ClaimTexts.blank(claim.getSessionWebhook()) || ClaimTexts.blank(claim.getRecommendation())) {
             return;
         }
+        String reply = conversationService.adviceWithLaw(claim.getRecommendation());
         List<ClaimConversationService.ClaimAction> actions = conversationService.adviceButtons(claim);
         if (actions.isEmpty()) {
-            send(claim.getSessionWebhook(), claim.getRecommendation());
+            send(claim.getSessionWebhook(), reply);
             return;
         }
-        sendCard(claim.getSessionWebhook(), claim.getRecommendation(), actions);
+        sendCard(claim.getSessionWebhook(), reply, actions);
     }
 
     private void sendCard(String webhook, String text, List<ClaimConversationService.ClaimAction> actions) {
