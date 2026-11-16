@@ -25,11 +25,23 @@ class ClaimHistoryExcelTest {
                 .mapToInt(sheet -> sheet.rows().size())
                 .sum();
         assertTrue(year2026 >= 150, "2026 全年统计应能读出，实际 " + year2026);
+        int chat = ClaimHistoryExcel.read(firstName(docs, "群聊客诉")).stream()
+                .mapToInt(sheet -> sheet.rows().size())
+                .sum();
+        assertTrue(chat >= 1000, "群聊梳理应能读出，实际 " + chat);
     }
 
     private int count(Path docs, String year) throws Exception {
         List<SheetTable> tables = ClaimHistoryExcel.read(first(docs, year));
         return tables.isEmpty() ? 0 : tables.get(0).rows().size();
+    }
+
+    private Path firstName(Path docs, String name) throws Exception {
+        try (var files = Files.list(docs)) {
+            return files.filter(path -> path.getFileName().toString().contains(name) && path.getFileName().toString().endsWith(".xlsx"))
+                    .findFirst()
+                    .orElseThrow();
+        }
     }
 
     private Path first(Path docs, String year) throws Exception {

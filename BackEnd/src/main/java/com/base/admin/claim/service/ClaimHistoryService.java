@@ -108,12 +108,29 @@ public class ClaimHistoryService {
         if (count != null && count > 0) {
             return;
         }
-        ClaimImportResultVO result = importFromDocs();
+        ClaimImportResultVO result = importFromDocs(false);
         log.info("已导入历史案例：{}", result.getMessage());
+    }
+
+    /** 表里已有案例时只补新行，不覆盖已经导入或手工改过的记录。 */
+    public void importMissing() {
+        Long count = historyMapper.selectCount(new LambdaQueryWrapper<>());
+        if (count == null || count == 0) {
+            return;
+        }
+        ClaimImportResultVO result = importFromDocs(true);
+        if (result.getInserted() > 0) {
+            log.info("已补历史案例：{}", result.getMessage());
+        }
     }
 
     @Transactional
     public ClaimImportResultVO importFromDocs() {
+        return importFromDocs(false);
+    }
+
+    @Transactional
+    public ClaimImportResultVO importFromDocs(boolean insertOnly) {
         Path dir = paths.historyDir();
         if (!Files.isDirectory(dir)) {
             throw new BusinessException("找不到历史案例目录：" + dir);
@@ -128,7 +145,7 @@ public class ClaimHistoryService {
                 throw new BusinessException("目录里没有客诉 Excel：" + dir);
             }
             for (Path file : excels) {
-                importFile(file, result);
+                importFile(file, result, insertOnly);
             }
         } catch (IOException ex) {
             throw new BusinessException("读取历史案例失败");
@@ -137,7 +154,7 @@ public class ClaimHistoryService {
         return result;
     }
 
-    private void importFile(Path file, ClaimImportResultVO result) throws IOException {
+    private void importFile(Path file, ClaimImportResultVO result, boolean insertOnly) throws IOException {
         String fileName = file.getFileName().toString();
         String year = fileName.contains("2024") ? "2024" : fileName.contains("2025") ? "2025" : fileName.contains("2026") ? "2026" : "";
         List<SheetTable> tables = ClaimHistoryExcel.read(file);
@@ -148,12 +165,12 @@ public class ClaimHistoryService {
         }
         for (SheetTable table : tables) {
             for (Map<String, String> row : table.rows()) {
-                upsert(fileName, year, row, result);
+                upsert(fileName, year, row, result, insertOnly);
             }
         }
     }
 
-    private void upsert(String fileName, String year, Map<String, String> row, ClaimImportResultVO result) {
+    private void upsert(String fileName, String year, Map<String, String> row, ClaimImportResultVO result, boolean insertOnly) {
         String content = ClaimHistoryExcel.text(row, "投诉内容");
         String name = ClaimHistoryExcel.text(row, "客户姓名", "顾客");
         String product = ClaimHistoryExcel.text(row, "产品名称");
@@ -166,21 +183,29 @@ public class ClaimHistoryService {
         String rawPurchase = ClaimHistoryExcel.text(row, "购买日期");
         String date = alignYear(rawDate, year);
         String purchase = alignYear(rawPurchase, year);
+        // 群聊梳理文件名不带年份，年份写在投诉日期里。
+        String sourceYear = year;
+        if (ClaimTexts.blank(sourceYear) && date.matches("\\d{4}-\\d{2}-\\d{2}")) {
+            sourceYear = date.substring(0, 4);
+        }
         ClaimHistoryCase found = historyMapper.selectOne(new LambdaQueryWrapper<ClaimHistoryCase>()
-                .eq(ClaimHistoryCase::getDedupeKey, dedupe(year, date, phone, name, product, brief))
+                .eq(ClaimHistoryCase::getDedupeKey, dedupe(sourceYear, date, phone, name, product, brief))
                 .last("limit 1"));
         if (found == null && !date.equals(rawDate)) {
             found = historyMapper.selectOne(new LambdaQueryWrapper<ClaimHistoryCase>()
-                    .eq(ClaimHistoryCase::getDedupeKey, dedupe(year, rawDate, phone, name, product, brief))
+                    .eq(ClaimHistoryCase::getDedupeKey, dedupe(sourceYear, rawDate, phone, name, product, brief))
                     .last("limit 1"));
+        }
+        if (found != null && insertOnly) {
+            return;
         }
         if (found != null && found.getManualEdited() != null && found.getManualEdited() == 1) {
             result.setSkipped(result.getSkipped() + 1);
             return;
         }
         ClaimHistoryCase target = found == null ? new ClaimHistoryCase() : found;
-        target.setDedupeKey(dedupe(year, date, phone, name, product, brief));
-        target.setSourceYear(year);
+        target.setDedupeKey(dedupe(sourceYear, date, phone, name, product, brief));
+        target.setSourceYear(sourceYear);
         target.setSourceFile(fileName);
         target.setComplaintDate(date);
         target.setPurchaseDate(purchase);

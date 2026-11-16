@@ -31,6 +31,7 @@ public class ClaimDataInitializer implements ApplicationRunner {
         sopService.ensureCatalogNodes();
         try {
             historyService.importIfEmpty();
+            historyService.importMissing();
         } catch (Exception ex) {
             log.warn("历史案例尚未导入：{}", ex.getMessage());
         }

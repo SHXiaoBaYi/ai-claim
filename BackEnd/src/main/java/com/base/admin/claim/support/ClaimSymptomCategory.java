@@ -146,7 +146,7 @@ public final class ClaimSymptomCategory {
         if (containsAny(value, "发货地", "不是新疆", "发货仓", "中转仓")) {
             return ORIGIN;
         }
-        if (containsAny(value, "异物", "头发", "塑料", "虫子", "石子")) {
+        if (containsAny(value, "异物", "头发", "塑料", "虫子", "石子", "石头")) {
             return FOREIGN;
         }
         if (containsAny(value, "缺斤", "少两", "重量不足", "不够秤", "分量不够", "量太少", "短斤")) {
@@ -180,7 +180,8 @@ public final class ClaimSymptomCategory {
         if (containsAny(value, "柴", "嚼不动", "咬不动", "太硬", "很硬", "不好吃")) {
             return true;
         }
-        String stripped = value.replace("老版", "").replace("老顾客", "").replace("老客", "").replace("老板", "");
+        String stripped = value.replace("老版", "").replace("老顾客", "").replace("老客", "").replace("老板", "")
+                .replace("老公", "").replace("老人", "").replace("老伴", "");
         return stripped.contains("老") || stripped.contains("硬");
     }
 
