@@ -630,6 +630,7 @@ public class ClaimConversationService {
         if (!ClaimTexts.blank(claim.getReferenceView())) {
             buttons.add(new ClaimAction("查看参照", base + "/claim/refs/" + claim.getReferenceToken()));
         }
+        buttons.add(new ClaimAction("查看消协法", page + "/law"));
         return buttons;
     }
 
@@ -741,36 +742,20 @@ public class ClaimConversationService {
         return text.toString().trim();
     }
 
-    /** 每条建议都带上 docs 里的消协法全文，特殊索赔再标明必须先分流。 */
+    /** 只放进生成综合建议的证据，不写进钉钉聊天回复。 */
     private void appendLaw(StringBuilder text, ClaimCase claim) {
         String demand = claim == null ? "" : ClaimTexts.empty(claim.getCustomerDemand());
         String symptom = claim == null ? "" : ClaimTexts.empty(claim.getSymptom());
         if (ClaimConsumerLaw.specialClaim(demand, symptom)) {
-            text.append("顾客有特殊索赔要求，必须先按下面消协法/食安法适用依据分流，再对照历史和 SOP：\n");
+            text.append("顾客有特殊索赔要求，必须先按下面消协法/食安法适用依据分流，再对照历史和 SOP。综合建议里不要贴出法条全文，不要写「消协法适用依据」标题：\n");
         } else {
-            text.append("先对照下面消协法适用依据，再看历史和 SOP。没有核实前不要承诺惩罚性赔偿。\n");
+            text.append("先对照下面消协法适用依据，再看历史和 SOP。没有核实前不要承诺惩罚性赔偿。综合建议里不要贴出法条全文，不要写「消协法适用依据」标题：\n");
         }
         text.append(consumerLaw()).append("\n");
     }
 
-    public String consumerLaw() {
+    private String consumerLaw() {
         return lawService.text();
-    }
-
-    /** 钉钉和综合建议页要能看见消协法，不把法条写进给顾客的话术段。 */
-    public String adviceWithLaw(String suggestion) {
-        String law = consumerLaw();
-        String body = ClaimTexts.empty(suggestion).trim();
-        if (ClaimTexts.blank(law)) {
-            return body;
-        }
-        if (body.contains("消协法适用依据")) {
-            return body;
-        }
-        if (body.isBlank()) {
-            return "消协法适用依据：\n" + law;
-        }
-        return body + "\n\n消协法适用依据：\n" + law;
     }
 
     /** 同一现象大类、同一产品里，人工采纳或退回过的建议。 */

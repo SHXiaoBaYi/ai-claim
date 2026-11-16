@@ -151,13 +151,13 @@ export default function ClaimAdvicePage() {
         </pre>
       )}
 
-      {page.law ? (
-        <section className='mt-4 rounded-lg bg-white p-4 shadow-sm'>
-          <h2 className='text-sm font-medium text-neutral-900'>消协法适用依据</h2>
-          <pre className='mt-2 max-h-96 overflow-auto text-sm leading-6 whitespace-pre-wrap text-neutral-700'>
-            {page.law}
-          </pre>
-        </section>
+      {token && page.law ? (
+        <Link
+          className='mt-4 block text-sm text-blue-600'
+          to={`/claim/advice/${token}/law`}
+        >
+          查看消协法
+        </Link>
       ) : null}
 
       <div className='mt-4 flex flex-col gap-2'>

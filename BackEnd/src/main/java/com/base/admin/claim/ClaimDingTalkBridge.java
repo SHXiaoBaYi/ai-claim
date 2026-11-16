@@ -156,7 +156,7 @@ public class ClaimDingTalkBridge implements ApplicationRunner {
         String webhook = message == null ? "" : message.getSessionWebhook();
         WaitingPace pace = new WaitingPace(webhook);
         try {
-            String reply = conversationService.adviceWithLaw(conversationService.handle(toInbound(message), pace));
+            String reply = conversationService.handle(toInbound(message), pace);
             List<ClaimConversationService.ClaimAction> actions = conversationService.takeActions();
             if (!actions.isEmpty()) {
                 sendCard(webhook, reply, actions);
@@ -307,7 +307,7 @@ public class ClaimDingTalkBridge implements ApplicationRunner {
         if (claim == null || ClaimTexts.blank(claim.getSessionWebhook()) || ClaimTexts.blank(claim.getRecommendation())) {
             return;
         }
-        String reply = conversationService.adviceWithLaw(claim.getRecommendation());
+        String reply = claim.getRecommendation();
         List<ClaimConversationService.ClaimAction> actions = conversationService.adviceButtons(claim);
         if (actions.isEmpty()) {
             send(claim.getSessionWebhook(), reply);
@@ -323,19 +323,31 @@ public class ClaimDingTalkBridge implements ApplicationRunner {
         }
         try {
             List<java.util.Map<String, String>> buttons = new ArrayList<>();
+            String lawUrl = "";
             for (ClaimConversationService.ClaimAction action : actions) {
                 if (action == null || ClaimTexts.blank(action.url())) {
+                    continue;
+                }
+                if ("查看消协法".equals(action.title())) {
+                    lawUrl = action.url();
                     continue;
                 }
                 buttons.add(java.util.Map.of(
                         "title", ClaimTexts.blank(action.title()) ? "查看" : action.title(),
                         "actionURL", action.url()));
             }
+            String plain = ClaimTexts.blank(text) ? "综合建议：请人工处理。" : text;
+            if (!lawUrl.isBlank()) {
+                plain = plain + "\n查看消协法：" + lawUrl;
+            }
             if (buttons.isEmpty()) {
-                send(webhook, text);
+                send(webhook, plain);
                 return;
             }
-            String markdown = ClaimTexts.blank(text) ? "综合建议：请人工处理。" : text.replace("\n", "\n\n");
+            String markdown = plain.replace("\n", "\n\n");
+            if (!lawUrl.isBlank()) {
+                markdown = markdown.replace("查看消协法：" + lawUrl, "[查看消协法](" + lawUrl + ")");
+            }
             String body = objectMapper.writeValueAsString(java.util.Map.of(
                     "msgtype", "actionCard",
                     "actionCard", java.util.Map.of(
