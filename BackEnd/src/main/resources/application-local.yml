@@ -21,6 +21,6 @@ xby:
     internal-host: 127.0.0.1
   # 勿写死 Windows 盘符：在 macOS/Linux 会被当成相对路径，配图落到 BackEnd/D:/... 且公网打不开
   upload-dir: ${UPLOAD_DIR:./uploads}
-  upload-public-base: ${UPLOAD_PUBLIC_BASE:http://47.103.191.164/shxby/api}
+  upload-public-base: ${UPLOAD_PUBLIC_BASE:https://47.103.191.164/shxby/api}
   auth:
     password-login-enabled: false

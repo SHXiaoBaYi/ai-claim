@@ -29,7 +29,7 @@ xby:
     password: ${RDS_PASSWORD:Xby@123456}
   upload-dir: ${UPLOAD_DIR:./uploads}
   # Java 代码不得再写死 IP 作 @Value 默认值
-  upload-public-base: ${UPLOAD_PUBLIC_BASE:http://47.103.191.164/shxby/api}
+  upload-public-base: ${UPLOAD_PUBLIC_BASE:https://47.103.191.164/shxby/api}
   # 账号密码登录：默认仅 localhost；测试环境在 application-test.yml 打开
   auth:
     password-login-enabled: ${XBY_PASSWORD_LOGIN_ENABLED:false}
@@ -55,7 +55,7 @@ xby:
     # 客诉 Excel 所在目录。本机从 BackEnd 启动默认 ../docs；ECS 发布到 /opt/xby-admin/docs
     history-dir: ${CLAIM_HISTORY_DIR:../docs}
     # 钉钉里「查看历史参照案例」打开的站点根地址
-    public-base-url: ${CLAIM_PUBLIC_BASE:http://47.103.191.164}
+    public-base-url: ${CLAIM_PUBLIC_BASE:https://47.103.191.164}
 
 mybatis-plus:
   mapper-locations: classpath:mapper/*.xml

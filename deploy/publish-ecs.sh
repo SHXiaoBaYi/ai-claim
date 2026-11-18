@@ -156,6 +156,10 @@ else
   fi
 fi
 
+echo "==> 确保 HTTPS 证书（签发时仍走当前的 80 端口）"
+scp_file "$ROOT/deploy/ensure-https.sh" "$REMOTE:/tmp/ensure-https.sh"
+ssh_run "bash /tmp/ensure-https.sh"
+
 echo "==> 上传 nginx / systemd"
 scp_file "$NGINX_SRC" "$REMOTE:/etc/nginx/conf.d/xby-admin.conf"
 scp_file "$UNIT_SRC" "$REMOTE:/etc/systemd/system/xby-admin.service"

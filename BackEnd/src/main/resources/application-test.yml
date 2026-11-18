@@ -7,7 +7,7 @@ spring:
     driver-class-name: com.mysql.cj.jdbc.Driver
 
 xby:
-  upload-public-base: ${UPLOAD_PUBLIC_BASE:http://47.103.191.164/shxby/api}
+  upload-public-base: ${UPLOAD_PUBLIC_BASE:https://47.103.191.164/shxby/api}
   # 只允许钉钉扫码登录
   auth:
     password-login-enabled: false

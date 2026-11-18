@@ -7,7 +7,7 @@ xby:
     database: base_admin
     username: ${RDS_USERNAME:xiaobayi0099}
     password: ${RDS_PASSWORD:Xby@123456}
-  upload-public-base: ${UPLOAD_PUBLIC_BASE:http://47.103.191.164/shxby/api}
+  upload-public-base: ${UPLOAD_PUBLIC_BASE:https://47.103.191.164/shxby/api}
   auth:
     password-login-enabled: false
 

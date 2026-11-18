@@ -76,9 +76,10 @@ else
   echo "跳过 systemd（未找到 $SERVICE_SRC）"
 fi
 
-# 防火墙放行 80（若存在 firewalld）
+# 防火墙放行 80 和 443（若存在 firewalld）。云安全组也要放行 443。
 if command -v firewall-cmd >/dev/null 2>&1; then
   firewall-cmd --permanent --add-service=http || true
+  firewall-cmd --permanent --add-service=https || true
   firewall-cmd --reload || true
 fi
 
