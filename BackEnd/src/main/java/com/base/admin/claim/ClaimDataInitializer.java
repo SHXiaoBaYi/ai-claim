@@ -35,6 +35,7 @@ public class ClaimDataInitializer implements ApplicationRunner {
         lawService.seedFromFile();
         sopService.seedIfEmpty();
         sopService.patchKeywordTraps();
+        sopService.patchAdviceRules();
         sopService.ensureCatalogNodes();
         try {
             historyService.importIfEmpty();

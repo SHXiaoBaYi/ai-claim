@@ -14,6 +14,7 @@ import com.base.admin.claim.mapper.ClaimHistoryCaseMapper;
 import com.base.admin.claim.mapper.ClaimMessageMapper;
 import com.base.admin.claim.ClaimPaths;
 import com.base.admin.claim.ClaimProperties;
+import com.base.admin.claim.support.ClaimAdvicePolish;
 import com.base.admin.claim.support.ClaimConsumerLaw;
 import com.base.admin.claim.support.ClaimProductGroup;
 import com.base.admin.claim.support.ClaimSymptomCategory;
@@ -534,20 +535,33 @@ public class ClaimConversationService {
     }
 
     private String suggest(ClaimCase claim, ClaimSopNode action, HistoryMatches matches, String evidence) {
+        String raw;
         if (!matches.judged()) {
-            return advice("历史对照没有完成，本次现象还不能定论。",
+            raw = advice("历史对照没有完成，本次现象还不能定论。",
                     "请人工核对现象、产品和顾客诉求，特殊索赔先对照消协法分流。",
                     "先不要自动给惩罚性赔偿，按现象人工定方案。",
                     "您好，这边先帮您核实情况和凭证，核实清楚后再给您明确处理方案，请您稍等。");
-        }
-        if (matches.actionable.isEmpty()) {
+        } else if (matches.actionable.isEmpty()) {
             String title = action == null ? "现象" : action.getTitle();
-            return advice("没有等价的历史参照，按「" + title + "」定性，并对照消协法看是否触发惩罚性赔偿。",
+            raw = advice("没有等价的历史参照，按「" + title + "」定性，并对照消协法看是否触发惩罚性赔偿。",
                     "按该流程核实证据、客群和责任；顾客索赔时先分流食安十倍还是欺诈赔三。",
                     "按「" + title + "」处理。",
-                    "您好，非常抱歉给您带来不便。我们会按核实结果给您退换或补偿，请您配合提供照片或凭证。");
+                    "您好，非常抱歉给您带来不便。我们会按核实结果给您补发或补偿，请您配合提供照片或凭证。");
+        } else {
+            raw = asAdvice(withoutNoHistoryClaim(synthesize(claim, sopSentence(action), evidence)));
         }
-        return asAdvice(withoutNoHistoryClaim(synthesize(claim, sopSentence(action), evidence)));
+        return polish(claim, raw);
+    }
+
+    /** 出稿后再卡一次：样品取回、物流核查、参考话术不写退款。 */
+    private String polish(ClaimCase claim, String advice) {
+        String complaint = "";
+        if (claim != null) {
+            complaint = ClaimTexts.empty(claim.getSymptom()) + "\n"
+                    + ClaimTexts.empty(claim.getProductName()) + "\n"
+                    + ClaimTexts.empty(claim.getCustomerDemand());
+        }
+        return ClaimAdvicePolish.apply(complaint, advice);
     }
 
     /** 综合建议固定四段：事件性质、行动步骤、具体方案、给顾客的参考话术。 */
@@ -564,7 +578,7 @@ public class ClaimConversationService {
             return advice("按历史参照案例、消协法和理赔 SOP 定性。",
                     "核对现象、证据和客群；特殊索赔先按消协法分流。",
                     "按历史参照案例的结案方式处理，未核实前不承诺惩罚性赔偿。",
-                    "您好，非常抱歉给您带来不便。我们先核实订单和货品情况，质量问题会给您退换或补偿，请您稍等。");
+                    "您好，非常抱歉给您带来不便。我们先核实订单和货品情况，质量问题会给您补发或补偿，请您稍等。");
         }
         if (!text.contains("给顾客的参考话术")) {
             text = text + "\n4. 给顾客的参考话术：您好，非常抱歉给您带来不便。我们会按核实结果给您处理，请您配合提供照片或消费凭证。";
@@ -669,22 +683,23 @@ public class ClaimConversationService {
         String fallback = advice("按历史参照案例、消协法和理赔 SOP 定性。",
                 "核对现象、证据和客群；特殊索赔先按消协法分流。",
                 "按历史参照案例的结案方式处理，未核实前不承诺惩罚性赔偿。",
-                "您好，非常抱歉给您带来不便。我们先核实订单和货品情况，质量问题会给您退换或补偿，请您稍等。");
+                "您好，非常抱歉给您带来不便。我们先核实订单和货品情况，质量问题会给您补发或补偿，请您稍等。");
         if (!aiChatService.isEnabled()) {
             return fallback;
         }
         String system = """
                 你是小巴依理赔助手。先看历史参照案例怎么结案，再对照消协法适用依据，再对照理赔 SOP，只写综合建议。
                 以「综合建议：」开头，后面只写这四行，不要多写别的标题：
-                1. 事件性质：这次投诉属于什么问题，责任倾向是质量、物流还是服务，能不能理赔；有索赔时写清走食安十倍、欺诈赔三，还是只退换补偿。
-                2. 行动步骤：要核实什么、要什么证据、看新客还是老客、要不要寄回核验。
-                3. 具体方案：补发、退款、换货或赔偿怎么做，写清数量、金额和责任归属。
-                4. 给顾客的参考话术：客服可直接发给顾客的原话，一两段，口语、致歉、说明下一步；不要写内部追责，不要对顾客念法条编号，除非顾客已经主张索赔。
+                1. 事件性质：这次投诉属于什么问题，责任倾向是质量、物流还是服务，能不能理赔；有索赔时写清走食安十倍、欺诈赔三，还是只补发补偿。
+                2. 行动步骤：要核实什么、要什么证据、看新客还是老客。这一段必须写明核对物流时效和物流轨迹，并结合收货地址远近综合研判。样品只在无法直接判定的异物（如动物芯片、疑似玻璃）时写取回核验；头发、花椒等能直接判定的异物，以及膻味、腥味、异味，都不要写取回或寄回。
+                3. 具体方案：补发、换货或赔偿怎么做，写清数量、金额和责任归属。常规不做退款，不要把退款写成默认方案。
+                4. 给顾客的参考话术：客服可直接发给顾客的原话，一两段，口语、致歉、说明下一步。不要出现退款、退货、退钱。不要写内部追责，不要对顾客念法条编号，除非顾客已经主张索赔。
                 每项一到两句。不要罗列案例，不要写依据标题。
+                下面三条优先于历史案例和 SOP 里的相反写法：仅无法判定的异物安排取回样品；可直接判定的异物和异味类问题都不取回；行动步骤每次都核对物流时效、物流轨迹，并结合收货地址远近综合研判；参考话术不写退款。
                 证据里已经有历史参照案例时，禁止写「没有历史参照案例」。
                 特殊案例不能当作这次的处理动作。相似案例不能当主依据。
                 货品不够、漏装不要写成缺斤，不要写退一赔三。缺斤查实且构成虚标/欺诈才写退一赔三，异物或变质索赔查实才写十倍且不足按 1000 元。
-                包装漏气、口感、肥瘦等无安全风险的，只退换或补偿，不要写惩罚性赔偿。
+                包装漏气、口感、肥瘦等无安全风险的，只补发或补偿，不要写惩罚性赔偿。
                 牛羊肉坏了不要写成蔬菜坏果。用中文，不要输出 JSON。
                 证据里有人工完全采纳或部分采纳的建议时，具体方案向那些靠拢。已退回的方案不要再写。
                 """;

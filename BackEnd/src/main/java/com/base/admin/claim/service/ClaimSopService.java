@@ -118,6 +118,48 @@ public class ClaimSopService {
         }
     }
 
+    /** 已入库的流程按旧文案替换这几条口径，不整表重写。 */
+    @Transactional
+    public void patchAdviceRules() {
+        replaceContent("product.smell",
+                "判断是第一次无法接受，还是同款里这一件有问题。",
+                "判断是第一次无法接受，还是同款里这一件有问题。异味不取回样品。");
+        replaceContent("product.bland",
+                "再核对系列、是否开化、烹饪方式和生产日期。",
+                "再核对系列、是否开化、烹饪方式和生产日期。异味、怪味不取回样品。");
+        replaceContent("product.color.logistics",
+                "货品可能有问题：道歉，并全额退款或补发。",
+                "货品可能有问题：道歉并补发。");
+        replaceContent("product.foreign",
+                "能看清的普通异物和可疑异物处理不同。",
+                "仅无法直接判定的异物（如动物芯片、疑似玻璃）安排取回；头发、花椒等可直接判定的异物不取回样品。");
+        replaceContent("product.foreign.no-claim",
+                "道歉后原单补发，可额外赠送赠品；或原单退款并额外赠送原单产品。",
+                "道歉后原单补发，可额外赠送赠品。头发、花椒等可直接判定的异物不取回样品。");
+        replaceContent("product.foreign.claim",
+                "能提供消费凭证的，退款并十倍赔偿，不足 1000 元按 1000 元。可疑物品要取回核验；能明确识别的普通异物不必取回，按标准赔付。",
+                "能提供消费凭证的，按十倍赔偿，不足 1000 元按 1000 元。仅无法判定的异物（如动物芯片、疑似玻璃）取回核验；头发、花椒等可直接判定的异物不必取回，按标准赔付。异味问题不取回样品。");
+        replaceContent("logistics",
+                "先核实发货时间、运输时长、当地气温、面单、开化照片和物流轨迹。",
+                "先核实发货时间、运输时长、当地气温、面单、开化照片和物流轨迹，并结合收货地址远近综合研判。");
+        replaceContent("logistics.severe",
+                "要核对时效是否正常，并警惕只接受退款、拒绝补发的情况。",
+                "要核对物流时效和物流轨迹，并结合收货地址远近综合研判，同时警惕只接受退款、拒绝补发的情况。异味不取回样品。");
+    }
+
+    private void replaceContent(String code, String from, String to) {
+        ClaimSopNode node = find(code);
+        if (node == null) {
+            return;
+        }
+        String content = ClaimTexts.empty(node.getContent());
+        if (!content.contains(from) || content.contains(to)) {
+            return;
+        }
+        node.setContent(content.replace(from, to));
+        sopNodeMapper.updateById(node);
+    }
+
     /** 已有流程时补上后来新增的节点，不覆盖已经改过的文案。 */
     @Transactional
     public void ensureCatalogNodes() {
