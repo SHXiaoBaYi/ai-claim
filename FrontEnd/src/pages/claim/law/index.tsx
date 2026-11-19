@@ -49,7 +49,7 @@ const ClaimLawPage = memo(function ClaimLawPage() {
       }
     >
       <p className='mb-3 text-sm text-neutral-500'>
-        生成综合建议时会按这里的消协法来写。钉钉消息里只放查看入口，打开后定位到本单相关条款。
+        生成综合建议时会按这里的消协法来写。钉钉卡片上有「查看消协法」按钮，打开后定位到本单相关条款。
       </p>
       <Input.TextArea
         rows={22}

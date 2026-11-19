@@ -323,31 +323,19 @@ public class ClaimDingTalkBridge implements ApplicationRunner {
         }
         try {
             List<java.util.Map<String, String>> buttons = new ArrayList<>();
-            String lawUrl = "";
             for (ClaimConversationService.ClaimAction action : actions) {
                 if (action == null || ClaimTexts.blank(action.url())) {
-                    continue;
-                }
-                if ("查看消协法".equals(action.title())) {
-                    lawUrl = action.url();
                     continue;
                 }
                 buttons.add(java.util.Map.of(
                         "title", ClaimTexts.blank(action.title()) ? "查看" : action.title(),
                         "actionURL", action.url()));
             }
-            String plain = ClaimTexts.blank(text) ? "综合建议：请人工处理。" : text;
-            if (!lawUrl.isBlank()) {
-                plain = plain + "\n查看消协法：" + lawUrl;
-            }
             if (buttons.isEmpty()) {
-                send(webhook, plain);
+                send(webhook, text);
                 return;
             }
-            String markdown = plain.replace("\n", "\n\n");
-            if (!lawUrl.isBlank()) {
-                markdown = markdown.replace("查看消协法：" + lawUrl, "[查看消协法](" + lawUrl + ")");
-            }
+            String markdown = ClaimTexts.blank(text) ? "综合建议：请人工处理。" : text.replace("\n", "\n\n");
             String body = objectMapper.writeValueAsString(java.util.Map.of(
                     "msgtype", "actionCard",
                     "actionCard", java.util.Map.of(
