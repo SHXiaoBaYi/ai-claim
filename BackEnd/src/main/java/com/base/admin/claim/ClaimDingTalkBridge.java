@@ -307,7 +307,7 @@ public class ClaimDingTalkBridge implements ApplicationRunner {
         if (claim == null || ClaimTexts.blank(claim.getSessionWebhook()) || ClaimTexts.blank(claim.getRecommendation())) {
             return;
         }
-        String reply = claim.getRecommendation();
+        String reply = conversationService.adviceChatReply(claim.getRecommendation());
         List<ClaimConversationService.ClaimAction> actions = conversationService.adviceButtons(claim);
         if (actions.isEmpty()) {
             send(claim.getSessionWebhook(), reply);

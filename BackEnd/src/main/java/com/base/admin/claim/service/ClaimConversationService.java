@@ -59,6 +59,9 @@ public class ClaimConversationService {
     private final AiChatService aiChatService;
     private final ObjectMapper objectMapper;
     private final ThreadLocal<List<ClaimAction>> pendingActions = new ThreadLocal<>();
+    private final ThreadLocal<String> revisionNote = new ThreadLocal<>();
+    private static final String ADVICE_REVISE = "adviceRevise";
+    private static final String ADVICE_CHAT_HINT = "要改这条综合建议，直接在这个聊天里说改哪里。";
 
     public interface ClaimPace {
         void startWaiting();
@@ -98,6 +101,7 @@ public class ClaimConversationService {
     @Transactional
     public String handle(ClaimInbound inbound, ClaimPace pace) {
         pendingActions.remove();
+        revisionNote.remove();
         if ("2".equals(inbound.conversationType())) {
             return "请在和理赔机器人的单聊里发送投诉，不要发在群里。";
         }
@@ -111,12 +115,15 @@ public class ClaimConversationService {
             } catch (RuntimeException ex) {
                 pendingActions.remove();
                 throw ex;
+            } finally {
+                revisionNote.remove();
             }
         }
     }
 
     @Transactional
     public ClaimCase recommendAgain(Long caseId) {
+        revisionNote.remove();
         ClaimCase claim = caseMapper.selectById(caseId);
         if (claim == null) {
             return null;
@@ -127,17 +134,39 @@ public class ClaimConversationService {
         return caseMapper.selectById(caseId);
     }
 
+    /** 钉钉里发出的综合建议末尾带一句：要改就在聊天里说。 */
+    public String adviceChatReply(String suggestion) {
+        String text = ClaimTexts.empty(suggestion).trim();
+        if (text.contains(ADVICE_CHAT_HINT)) {
+            return text;
+        }
+        return text + "\n\n" + ADVICE_CHAT_HINT;
+    }
+
     private String handleLocked(ClaimInbound inbound, String conversationId, ClaimPace pace) {
         String text = ClaimTexts.empty(inbound.text());
-        if (ClaimTexts.isAbortPhrase(text)) {
+        ClaimCase claim = current(conversationId);
+        ClaimCase advised = latestRecommended(conversationId);
+        boolean hasAdvice = advised != null && !ClaimTexts.blank(advised.getRecommendation());
+        if (claim == null && !hasAdvice && ClaimTexts.isAbortPhrase(text)) {
             return abort(inbound, conversationId, text);
         }
-        boolean fresh = text.contains("新投诉") || text.contains("新的投诉") || text.contains("再录一单");
-        ClaimCase claim = current(conversationId);
-        if (claim != null && fresh) {
-            claim.setStatus(ClaimCase.INTERRUPTED);
-            caseMapper.updateById(claim);
-            claim = null;
+        if (claim != null || hasAdvice) {
+            TurnIntent intent = classifyTurn(text, claim, hasAdvice ? advised : null);
+            if (intent == TurnIntent.ABORT) {
+                return abort(inbound, conversationId, text);
+            }
+            if (intent == TurnIntent.NEW) {
+                if (claim != null) {
+                    claim.setStatus(ClaimCase.INTERRUPTED);
+                    claim.setPendingSlot("");
+                    caseMapper.updateById(claim);
+                    claim = null;
+                }
+                clearAdviceRevise(conversationId);
+            } else if (claim == null) {
+                return continueAdviceChat(inbound, conversationId, text, pace, intent);
+            }
         }
         boolean created = false;
         if (claim == null || ClaimCase.RECOMMENDED.equals(claim.getStatus()) || ClaimCase.INTERRUPTED.equals(claim.getStatus())) {
@@ -167,7 +196,7 @@ public class ClaimConversationService {
         }
         String reply;
         if (ready(claim)) {
-            reply = finish(claim, pace);
+            reply = adviceChatReply(finish(claim, pace));
         } else {
             String packed = nextQuestion(claim);
             claim.setPendingSlot(packed == null ? "" : pendingOf(packed));
@@ -183,6 +212,17 @@ public class ClaimConversationService {
     private String abort(ClaimInbound inbound, String conversationId, String text) {
         ClaimCase claim = current(conversationId);
         if (claim == null) {
+            ClaimCase advised = latestRecommended(conversationId);
+            if (advised != null) {
+                if (!text.isBlank()) {
+                    saveMessage(advised.getId(), "user", inbound.msgType() == null ? "text" : inbound.msgType(), text);
+                }
+                advised.setPendingSlot("");
+                caseMapper.updateById(advised);
+                String reply = "这张投诉先停在这里。还要改建议就直接说；要录新的一单，直接发投诉内容。";
+                saveMessage(advised.getId(), "bot", "text", reply);
+                return reply;
+            }
             return "当前没有进行中的投诉。要记录时，直接发投诉内容。";
         }
         if (!text.isBlank()) {
@@ -196,6 +236,167 @@ public class ClaimConversationService {
         String reply = "这张投诉已中断，不再继续追问。需要重新记录时，直接发投诉内容，或回复「新投诉」。";
         saveMessage(claim.getId(), "bot", "text", reply);
         return reply;
+    }
+
+    /**
+     * 模型已经判定这句话还在说当前综合建议。
+     * 只表达要改、没说改法时追问；说了改法或要求再出一版，就按这句话重出。
+     */
+    private String continueAdviceChat(ClaimInbound inbound, String conversationId, String text, ClaimPace pace, TurnIntent intent) {
+        ClaimCase advised = latestRecommended(conversationId);
+        if (advised == null || ClaimTexts.blank(advised.getRecommendation())) {
+            return null;
+        }
+        List<String> saved = saveFiles(advised.getId(), inbound.files());
+        String userText = text;
+        if (userText.isBlank() && !saved.isEmpty()) {
+            userText = "已发送证据：" + String.join("、", saved);
+        }
+        if (!userText.isBlank()) {
+            saveMessage(advised.getId(), "user", inbound.msgType() == null ? "text" : inbound.msgType(), userText);
+        }
+        if (!ClaimTexts.blank(inbound.senderName())) {
+            advised.setSenderName(inbound.senderName());
+        }
+        if (!ClaimTexts.blank(inbound.sessionWebhook())) {
+            advised.setSessionWebhook(ClaimTexts.clip(inbound.sessionWebhook(), 1000));
+        }
+        if (intent == TurnIntent.ASK || text.isBlank()) {
+            advised.setPendingSlot(ADVICE_REVISE);
+            caseMapper.updateById(advised);
+            String reply = text.isBlank()
+                    ? "照片先记下了。这条综合建议要改哪里，直接用文字说。"
+                    : "这条综合建议要改哪里？直接说，例如方案改成补发、话术不要写十倍，或再给一条建议。";
+            reply = appendFileErrors(reply, inbound.files());
+            saveMessage(advised.getId(), "bot", "text", reply);
+            return reply;
+        }
+        rejectCurrentAdvice(advised);
+        revisionNote.set(text);
+        String reply = adviceChatReply(finish(advised, pace));
+        reply = appendFileErrors(reply, inbound.files());
+        saveMessage(advised.getId(), "bot", "text", reply);
+        return reply;
+    }
+
+    private void clearAdviceRevise(String conversationId) {
+        ClaimCase advised = latestRecommended(conversationId);
+        if (advised == null || !ADVICE_REVISE.equals(ClaimTexts.empty(advised.getPendingSlot()))) {
+            return;
+        }
+        advised.setPendingSlot("");
+        caseMapper.updateById(advised);
+    }
+
+    private enum TurnIntent {
+        CONTINUE, REVISE, ASK, NEW, ABORT
+    }
+
+    /** 先看这句话的意图，再决定继续当前投诉、改综合建议，还是另开一单。 */
+    private TurnIntent classifyTurn(String text, ClaimCase collecting, ClaimCase advised) {
+        boolean hasAdvice = advised != null && !ClaimTexts.blank(advised.getRecommendation());
+        if (ClaimTexts.blank(text)) {
+            return collecting != null ? TurnIntent.CONTINUE : TurnIntent.ASK;
+        }
+        if (!aiChatService.isEnabled()) {
+            return fallbackIntent(text, collecting, advised);
+        }
+        String system = """
+                你是理赔对话的意图分类器。只判断用户这一句话想做什么。
+                不要回答投诉，不要写建议。只输出一个英文词：
+                CONTINUE 还在补充正在录入的这张投诉，或在回答机器人刚才的追问。
+                REVISE 还在说已经给出的这条综合建议：不满意并说了改法、要求重出、再给一条建议、换方案、换话术。
+                ASK 想改当前综合建议，但没说改哪里，例如只说不满意、改一下。
+                NEW 要另开一笔新投诉，说的是另一单或另一位顾客，或明确要重新录一单。
+                ABORT 要停掉当前这张投诉，不再继续。
+                「重新再给一条建议」「重新在给一条建议」「再出一版」是 REVISE，不是 NEW。
+                没有正在录入的投诉时，不要输出 CONTINUE。
+                正在录入时，回答电话、姓名、门店、产品、现象、诉求的，输出 CONTINUE，不要输出 NEW。
+                """;
+        StringBuilder user = new StringBuilder();
+        if (collecting == null) {
+            user.append("正在录入：无\n");
+        } else {
+            user.append("正在录入：").append(snapshot(collecting)).append('\n');
+            user.append("正在追问：").append(ClaimTexts.empty(collecting.getPendingSlot())).append('\n');
+        }
+        if (!hasAdvice) {
+            user.append("已出综合建议：无\n");
+        } else {
+            user.append("已出综合建议：").append(ClaimTexts.clip(advised.getRecommendation(), 400)).append('\n');
+        }
+        user.append("用户这句话：").append(text);
+        try {
+            String answer = aiChatService.chat(system, user.toString(), null, 0.0);
+            TurnIntent intent = parseIntent(answer);
+            if (intent == null) {
+                log.warn("意图识别没有给出可用结果: {}", ClaimTexts.clip(answer, 80));
+                return fallbackIntent(text, collecting, advised);
+            }
+            if (collecting == null && intent == TurnIntent.CONTINUE && hasAdvice) {
+                intent = TurnIntent.REVISE;
+            }
+            if (!hasAdvice && (intent == TurnIntent.REVISE || intent == TurnIntent.ASK)) {
+                intent = collecting != null ? TurnIntent.CONTINUE : TurnIntent.NEW;
+            }
+            log.info("理赔意图 {} : {}", intent, ClaimTexts.clip(text, 80));
+            return intent;
+        } catch (Exception ex) {
+            log.warn("意图识别失败: {}", ex.getMessage());
+            return fallbackIntent(text, collecting, advised);
+        }
+    }
+
+    private TurnIntent parseIntent(String answer) {
+        String raw = ClaimTexts.empty(answer).toUpperCase(java.util.Locale.ROOT).replaceAll("[^A-Z]", " ").trim();
+        if (raw.isEmpty()) {
+            return null;
+        }
+        String token = raw.split("\\s+")[0];
+        return switch (token) {
+            case "CONTINUE" -> TurnIntent.CONTINUE;
+            case "REVISE" -> TurnIntent.REVISE;
+            case "ASK" -> TurnIntent.ASK;
+            case "NEW" -> TurnIntent.NEW;
+            case "ABORT" -> TurnIntent.ABORT;
+            default -> null;
+        };
+    }
+
+    /** 模型不可用时才用说法兜底，避免把「再给一条建议」开成新投诉。 */
+    private TurnIntent fallbackIntent(String text, ClaimCase collecting, ClaimCase advised) {
+        if (ClaimTexts.isAbortPhrase(text)) {
+            return TurnIntent.ABORT;
+        }
+        boolean hasAdvice = advised != null && !ClaimTexts.blank(advised.getRecommendation());
+        if (text.contains("新投诉") || text.contains("新的投诉") || text.contains("再录一单")) {
+            return TurnIntent.NEW;
+        }
+        if (hasAdvice && ClaimTexts.isAdviceRevision(text)) {
+            return ClaimTexts.isBareAdviceRevision(text) ? TurnIntent.ASK : TurnIntent.REVISE;
+        }
+        if (collecting != null) {
+            return TurnIntent.CONTINUE;
+        }
+        if (hasAdvice) {
+            return TurnIntent.ASK;
+        }
+        return TurnIntent.NEW;
+    }
+
+    private void rejectCurrentAdvice(ClaimCase claim) {
+        ClaimAdviceDecision row = new ClaimAdviceDecision();
+        row.setCaseId(claim.getId());
+        row.setDecision(ClaimAdviceDecision.REDO);
+        row.setOriginalAdvice(ClaimTexts.empty(claim.getRecommendation()));
+        row.setFinalAdvice("");
+        row.setSymptomCategory(ClaimTexts.empty(claim.getSymptomCategory()));
+        row.setProductGroup(ClaimTexts.empty(claim.getProductGroup()));
+        String name = ClaimTexts.empty(claim.getSenderName());
+        row.setDeciderName(ClaimTexts.clip(name.isBlank() ? "人工" : name, 64));
+        decisionMapper.insert(row);
+        claim.setAdviceDecision(ClaimAdviceDecision.REDO);
+        claim.setPendingSlot("");
     }
 
     private void discard(Long caseId) {
@@ -256,6 +457,14 @@ public class ClaimConversationService {
         return caseMapper.selectOne(new LambdaQueryWrapper<ClaimCase>()
                 .eq(ClaimCase::getConversationId, conversationId)
                 .eq(ClaimCase::getStatus, ClaimCase.COLLECTING)
+                .orderByDesc(ClaimCase::getId)
+                .last("limit 1"));
+    }
+
+    private ClaimCase latestRecommended(String conversationId) {
+        return caseMapper.selectOne(new LambdaQueryWrapper<ClaimCase>()
+                .eq(ClaimCase::getConversationId, conversationId)
+                .eq(ClaimCase::getStatus, ClaimCase.RECOMMENDED)
                 .orderByDesc(ClaimCase::getId)
                 .last("limit 1"));
     }
@@ -638,9 +847,6 @@ public class ClaimConversationService {
         }
         String page = base + "/claim/advice/" + claim.getReferenceToken();
         List<ClaimAction> buttons = new ArrayList<>();
-        buttons.add(new ClaimAction("完全采纳", page + "?do=adopt"));
-        buttons.add(new ClaimAction("不满意重出", page + "?do=redo"));
-        buttons.add(new ClaimAction("部分修改", page + "?do=edit"));
         if (!ClaimTexts.blank(claim.getReferenceView())) {
             buttons.add(new ClaimAction("查看参照", base + "/claim/refs/" + claim.getReferenceToken()));
         }
@@ -702,6 +908,7 @@ public class ClaimConversationService {
                 包装漏气、口感、肥瘦等无安全风险的，只补发或补偿，不要写惩罚性赔偿。
                 牛羊肉坏了不要写成蔬菜坏果。用中文，不要输出 JSON。
                 证据里有人工完全采纳或部分采纳的建议时，具体方案向那些靠拢。已退回的方案不要再写。
+                证据里有「用户要修改当前这条综合建议」时，按用户这句话改提到的部分，没提到的部分保持原意，不要复述刚被退回的方案。
                 """;
         try {
             String answer = aiChatService.chat(system, "档案：\n" + snapshot(claim) + "\n\n" + evidence + "\n\nSOP：" + sop, null, 0.2);
@@ -721,6 +928,7 @@ public class ClaimConversationService {
 
     private String evidence(ClaimCase claim, ClaimSopNode symptom, ClaimSopNode action, HistoryMatches matches) {
         StringBuilder text = new StringBuilder();
+        appendRevision(text);
         appendLaw(text, claim);
         String category = ClaimTexts.empty(matches.category());
         String productGroup = ClaimTexts.empty(matches.productGroup());
@@ -755,6 +963,17 @@ public class ClaimConversationService {
         }
         appendDecisions(text, matches.category(), matches.productGroup());
         return text.toString().trim();
+    }
+
+    /** 用户在聊天里指出这条综合建议哪里不行，只放进下一次出稿。 */
+    private void appendRevision(StringBuilder text) {
+        String note = revisionNote.get();
+        if (ClaimTexts.blank(note)) {
+            return;
+        }
+        text.append("用户要修改当前这条综合建议，在聊天里说：")
+                .append(ClaimTexts.clip(note, 300))
+                .append("\n按这句话改提到的部分，没提到的部分保持原意，不要照抄已退回的建议。\n");
     }
 
     /** 只放进生成综合建议的证据，不写进钉钉聊天回复。 */
@@ -991,11 +1210,15 @@ public class ClaimConversationService {
                 .eq(ClaimMessage::getCaseId, claim.getId())
                 .orderByAsc(ClaimMessage::getId));
         StringBuilder text = new StringBuilder();
+        boolean advised = false;
         for (ClaimMessage message : messages) {
-            if (!"user".equals(message.getRoleName())) {
+            String content = ClaimTexts.empty(message.getContent());
+            if (!advised && "bot".equals(message.getRoleName()) && content.contains("综合建议")) {
+                advised = true;
+            }
+            if (!"user".equals(message.getRoleName()) || advised) {
                 continue;
             }
-            String content = ClaimTexts.empty(message.getContent());
             if (content.isBlank() || content.startsWith("已发送证据")) {
                 continue;
             }

@@ -23,6 +23,24 @@ class ClaimFactParseTest {
     }
 
     @Test
+    void treatsShortDissentAsAdviceChatAndLeavesNewComplaintsAlone() {
+        assertTrue(ClaimTexts.isAdviceDissent("不满意"));
+        assertTrue(ClaimTexts.isAdviceDissent("不满意，不要写十倍，改成补发"));
+        assertTrue(ClaimTexts.isAdviceRevision("部分修改"));
+        assertTrue(ClaimTexts.isAdviceRevision("把具体方案改成只补发"));
+        assertTrue(ClaimTexts.isAdviceRevision("重新再给一条建议"));
+        assertTrue(ClaimTexts.isAdviceRevision("重新在给一条建议"));
+        assertFalse(ClaimTexts.isBareAdviceRevision("重新再给一条建议"));
+        assertTrue(ClaimTexts.isBareAdviceDissent("不满意"));
+        assertTrue(ClaimTexts.isBareAdviceRevision("部分修改"));
+        assertFalse(ClaimTexts.isBareAdviceDissent("不满意，不要写十倍"));
+        assertFalse(ClaimTexts.isBareAdviceRevision("把具体方案改成只补发"));
+        assertFalse(ClaimTexts.isAdviceDissent("顾客张三反馈上周在克西路店买的羊肉太硬了"));
+        assertFalse(ClaimTexts.isAdviceRevision("顾客要求改成退款，上周在京东买的牛肉坏了"));
+        assertFalse(ClaimTexts.isAdviceDissent("新投诉"));
+    }
+
+    @Test
     void recognizesAbortAndIgnoresGreeting() {
         assertTrue(ClaimTexts.isAbortPhrase("不投诉了"));
         assertTrue(ClaimTexts.isAbortPhrase("中断投诉"));

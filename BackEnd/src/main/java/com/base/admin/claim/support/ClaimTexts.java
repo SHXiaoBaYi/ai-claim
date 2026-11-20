@@ -88,6 +88,104 @@ public final class ClaimTexts {
                 || value.matches("^(取消|中断|终止|停止|结束|算了|不用了|罢了|取消吧|结束吧|停止吧|算了吧)$");
     }
 
+    /**
+     * 用户在说这条综合建议不行，不是在报一笔新投诉。
+     * 短句里的「不满意」算；超过 24 字必须点到建议、方案或改法。
+     */
+    public static boolean isAdviceDissent(String text) {
+        String value = empty(text).replaceAll("\\s+", "");
+        if (value.isEmpty() || value.length() > 80) {
+            return false;
+        }
+        if (value.contains("新投诉") || value.contains("再录")) {
+            return false;
+        }
+        boolean dissent = value.contains("不满意") || value.contains("不认可") || value.contains("不采纳")
+                || value.contains("不合适") || value.contains("重出") || value.contains("重新出")
+                || value.contains("再出一版") || value.contains("换一版") || value.contains("换个方案")
+                || value.contains("这个不行") || value.contains("这条不行") || value.contains("建议不行")
+                || value.contains("方案不行") || value.contains("不太行");
+        if (!dissent && value.matches("^(不行|不行啊|不行吧|不好)$")) {
+            dissent = true;
+        }
+        if (!dissent) {
+            return false;
+        }
+        if (value.length() <= 24) {
+            return true;
+        }
+        return value.contains("建议") || value.contains("方案") || value.contains("这条") || value.contains("重出")
+                || value.contains("话术") || value.contains("赔偿") || value.contains("补发") || value.contains("十倍")
+                || value.contains("退款") || value.contains("换货");
+    }
+
+    /** 只表示不满意，还没说要改哪里。 */
+    public static boolean isBareAdviceDissent(String text) {
+        String value = empty(text).replaceAll("[\\s。！!？?，,、~～]", "");
+        return value.matches("^(不满意|不太满意|不认可|不采纳|不合适|不行|不行啊|不行吧|不好|不太行|重出|重新出|再出|再出一版|换一版|换个方案|这个不行|这条不行|建议不行|方案不行)$");
+    }
+
+    /**
+     * 用户在改当前这条综合建议：不满意，或直接说改哪里。
+     * 「改成」必须对着建议、方案、话术，或以改/把开头，避免把新投诉收进来。
+     */
+    public static boolean isAdviceRevision(String text) {
+        if (isAdviceDissent(text) || isBareAdviceRevision(text) || asksAnotherAdvice(text)) {
+            return true;
+        }
+        String value = empty(text).replaceAll("\\s+", "");
+        if (value.isEmpty() || value.length() > 80) {
+            return false;
+        }
+        if (value.contains("新投诉") || value.contains("再录")) {
+            return false;
+        }
+        boolean edit = value.contains("部分修改") || value.contains("改一下") || value.contains("修改一下")
+                || value.contains("调整一下") || value.contains("改成") || value.contains("改为")
+                || value.contains("改方案") || value.contains("改话术");
+        if (!edit) {
+            return false;
+        }
+        boolean aboutAdvice = value.contains("建议") || value.contains("方案") || value.contains("话术")
+                || value.contains("事件性质") || value.contains("行动步骤") || value.contains("这条");
+        boolean leadsWithEdit = value.startsWith("改") || value.startsWith("把") || value.startsWith("部分")
+                || value.startsWith("话术") || value.startsWith("方案") || value.startsWith("事件")
+                || value.startsWith("行动") || value.startsWith("调整");
+        return aboutAdvice || leadsWithEdit;
+    }
+
+    /**
+     * 还是这一单，只是要再出一条综合建议。
+     * 「重新在给」按「重新再给」认，避免打字把再写成在之后被当成新投诉。
+     */
+    public static boolean asksAnotherAdvice(String text) {
+        String value = empty(text).replaceAll("\\s+", "");
+        if (value.isEmpty() || value.length() > 40) {
+            return false;
+        }
+        if (value.contains("新投诉") || value.contains("再录")) {
+            return false;
+        }
+        String normalized = value.replace("重新在", "重新再");
+        boolean asksAgain = normalized.contains("再给") || normalized.contains("再来") || normalized.contains("再出")
+                || normalized.contains("重新给") || normalized.contains("换一") || normalized.contains("重新生成")
+                || normalized.contains("再生成");
+        if (!asksAgain) {
+            return false;
+        }
+        return normalized.contains("建议") || normalized.contains("方案")
+                || normalized.matches("^(再给一条|再来一条|再出一条|重新给一条|重新再给一条|换一条|再给一个|再来一个|重新生成一条|再生成一条)$");
+    }
+
+    /** 只说要改，还没说改哪一段。 */
+    public static boolean isBareAdviceRevision(String text) {
+        if (isBareAdviceDissent(text)) {
+            return true;
+        }
+        String value = empty(text).replaceAll("[\\s。！!？?，,、~～]", "");
+        return value.matches("^(部分修改|改一下|修改一下|调整一下|我要改|改改|帮我改|再改一下)$");
+    }
+
     public static String customerNameOf(String text) {
         if (blank(text)) {
             return "";
