@@ -177,6 +177,33 @@ public final class ClaimTexts {
                 || normalized.matches("^(再给一条|再来一条|再出一条|重新给一条|重新再给一条|换一条|再给一个|再来一个|重新生成一条|再生成一条)$");
     }
 
+    /**
+     * 用户已经给出要照做的处理方案，不是只要机器人再出一版。
+     * 「重新再给一条建议」不算。
+     */
+    public static boolean isUserPlan(String text) {
+        String value = empty(text).replaceAll("\\s+", "");
+        if (value.isEmpty() || value.length() > 120) {
+            return false;
+        }
+        if (value.contains("新投诉") || value.contains("再录")) {
+            return false;
+        }
+        if (asksAnotherAdvice(text) && !value.contains("改成") && !value.contains("改为") && !value.contains("方案")) {
+            return false;
+        }
+        boolean directs = value.contains("按我") || value.contains("按我说") || value.contains("就按")
+                || value.contains("方案改成") || value.contains("方案改为") || value.contains("处理方案")
+                || value.contains("按这个方案") || value.contains("照这个方案") || value.contains("按这个处理");
+        if (directs) {
+            return true;
+        }
+        boolean concrete = value.contains("改成") || value.contains("改为");
+        boolean action = value.contains("补发") || value.contains("退款") || value.contains("赔偿")
+                || value.contains("换货") || value.contains("补偿") || value.contains("十倍") || value.contains("赔三");
+        return concrete && action && (value.contains("方案") || value.contains("建议") || value.contains("处理") || value.length() <= 40);
+    }
+
     /** 只说要改，还没说改哪一段。 */
     public static boolean isBareAdviceRevision(String text) {
         if (isBareAdviceDissent(text)) {

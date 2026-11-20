@@ -271,6 +271,12 @@ public class ClaimConversationService {
             saveMessage(advised.getId(), "bot", "text", reply);
             return reply;
         }
+        if (intent == TurnIntent.FOLLOW) {
+            String reply = adviceChatReply(applyUserPlan(advised, text));
+            reply = appendFileErrors(reply, inbound.files());
+            saveMessage(advised.getId(), "bot", "text", reply);
+            return reply;
+        }
         rejectCurrentAdvice(advised);
         revisionNote.set(text);
         String reply = adviceChatReply(finish(advised, pace));
@@ -289,7 +295,7 @@ public class ClaimConversationService {
     }
 
     private enum TurnIntent {
-        CONTINUE, REVISE, ASK, NEW, ABORT
+        CONTINUE, REVISE, ASK, FOLLOW, NEW, ABORT
     }
 
     /** 先看这句话的意图，再决定继续当前投诉、改综合建议，还是另开一单。 */
@@ -305,11 +311,13 @@ public class ClaimConversationService {
                 你是理赔对话的意图分类器。只判断用户这一句话想做什么。
                 不要回答投诉，不要写建议。只输出一个英文词：
                 CONTINUE 还在补充正在录入的这张投诉，或在回答机器人刚才的追问。
-                REVISE 还在说已经给出的这条综合建议：不满意并说了改法、要求重出、再给一条建议、换方案、换话术。
+                REVISE 不满意当前建议，或要求重出、再给一条，但没有拿出要照做的处理方案。
+                FOLLOW 不满意当前处理方案，并且已经给出自己的处理方案，要求就按这个方案来。例如「方案改成补发两斤」「就按退款200」「按我的方案：补偿100元」。
                 ASK 想改当前综合建议，但没说改哪里，例如只说不满意、改一下。
                 NEW 要另开一笔新投诉，说的是另一单或另一位顾客，或明确要重新录一单。
                 ABORT 要停掉当前这张投诉，不再继续。
-                「重新再给一条建议」「重新在给一条建议」「再出一版」是 REVISE，不是 NEW。
+                「重新再给一条建议」「重新在给一条建议」「再出一版」是 REVISE，不是 NEW，也不是 FOLLOW。
+                用户已经说清补发、退款、赔偿、换货或金额，并要求按这个处理的，是 FOLLOW，不是 REVISE。
                 没有正在录入的投诉时，不要输出 CONTINUE。
                 正在录入时，回答电话、姓名、门店、产品、现象、诉求的，输出 CONTINUE，不要输出 NEW。
                 """;
@@ -336,7 +344,7 @@ public class ClaimConversationService {
             if (collecting == null && intent == TurnIntent.CONTINUE && hasAdvice) {
                 intent = TurnIntent.REVISE;
             }
-            if (!hasAdvice && (intent == TurnIntent.REVISE || intent == TurnIntent.ASK)) {
+            if (!hasAdvice && (intent == TurnIntent.REVISE || intent == TurnIntent.ASK || intent == TurnIntent.FOLLOW)) {
                 intent = collecting != null ? TurnIntent.CONTINUE : TurnIntent.NEW;
             }
             log.info("理赔意图 {} : {}", intent, ClaimTexts.clip(text, 80));
@@ -357,6 +365,7 @@ public class ClaimConversationService {
             case "CONTINUE" -> TurnIntent.CONTINUE;
             case "REVISE" -> TurnIntent.REVISE;
             case "ASK" -> TurnIntent.ASK;
+            case "FOLLOW" -> TurnIntent.FOLLOW;
             case "NEW" -> TurnIntent.NEW;
             case "ABORT" -> TurnIntent.ABORT;
             default -> null;
@@ -371,6 +380,9 @@ public class ClaimConversationService {
         boolean hasAdvice = advised != null && !ClaimTexts.blank(advised.getRecommendation());
         if (text.contains("新投诉") || text.contains("新的投诉") || text.contains("再录一单")) {
             return TurnIntent.NEW;
+        }
+        if (hasAdvice && ClaimTexts.isUserPlan(text)) {
+            return TurnIntent.FOLLOW;
         }
         if (hasAdvice && ClaimTexts.isAdviceRevision(text)) {
             return ClaimTexts.isBareAdviceRevision(text) ? TurnIntent.ASK : TurnIntent.REVISE;
@@ -397,6 +409,96 @@ public class ClaimConversationService {
         decisionMapper.insert(row);
         claim.setAdviceDecision(ClaimAdviceDecision.REDO);
         claim.setPendingSlot("");
+    }
+
+    /** 用户已经给出处理方案。具体方案按他的原意写，不再用历史和 SOP 另出一套。 */
+    private String applyUserPlan(ClaimCase claim, String userPlan) {
+        String previous = ClaimTexts.empty(claim.getRecommendation());
+        String next = rewriteWithUserPlan(previous, userPlan);
+        ClaimAdviceDecision row = new ClaimAdviceDecision();
+        row.setCaseId(claim.getId());
+        row.setDecision(ClaimAdviceDecision.PARTIAL);
+        row.setOriginalAdvice(previous);
+        row.setFinalAdvice(next);
+        row.setSymptomCategory(ClaimTexts.empty(claim.getSymptomCategory()));
+        row.setProductGroup(ClaimTexts.empty(claim.getProductGroup()));
+        String name = ClaimTexts.empty(claim.getSenderName());
+        row.setDeciderName(ClaimTexts.clip(name.isBlank() ? "人工" : name, 64));
+        decisionMapper.insert(row);
+        claim.setAdviceDecision(ClaimAdviceDecision.PARTIAL);
+        claim.setRecommendation(next);
+        claim.setPendingSlot("");
+        claim.setStatus(ClaimCase.RECOMMENDED);
+        caseMapper.updateById(claim);
+        pendingActions.set(adviceButtons(claim));
+        return next;
+    }
+
+    private String rewriteWithUserPlan(String current, String userPlan) {
+        String nature = adviceSection(current, "事件性质");
+        String actions = adviceSection(current, "行动步骤");
+        String locked = ClaimTexts.clip(ClaimTexts.empty(userPlan).trim(), 500);
+        String fallbackScript = "您好，非常抱歉给您带来不便。我们按这个方案给您处理：" + locked;
+        String fallback = advice(blankSection(nature, "按当前投诉定性。"),
+                blankSection(actions, "按当前投诉继续核实。"),
+                locked,
+                fallbackScript);
+        if (!aiChatService.isEnabled() || locked.isBlank()) {
+            return fallback;
+        }
+        String system = """
+                你只把用户指定的处理方案写进综合建议。以「综合建议：」开头，后面只写这四行：
+                1. 事件性质
+                2. 行动步骤
+                3. 具体方案
+                4. 给顾客的参考话术
+                具体方案必须按用户的处理方案写。赔偿方式、数量、金额、补发、退款、换货都保持用户原意，不得改成历史案例、SOP 或另一套方案。
+                事件性质和行动步骤沿用当前建议；只有和用户方案冲突时才改衔接，不要另换定性。
+                参考话术按用户的处理方案写给顾客，不要偷偷改回别的处理。用中文，不要输出 JSON。
+                """;
+        try {
+            String answer = aiChatService.chat(system,
+                    "当前综合建议：\n" + current + "\n\n用户指定的处理方案：\n" + locked, null, 0.1);
+            String text = ClaimTexts.empty(answer).trim();
+            String plan = adviceSection(text, "具体方案");
+            if (plan.isBlank() || !text.contains("事件性质") || !text.contains("行动步骤")) {
+                return fallback;
+            }
+            if (!text.startsWith("综合建议")) {
+                text = "综合建议：\n" + text;
+            }
+            if (!text.contains("给顾客的参考话术")) {
+                text = text + "\n4. 给顾客的参考话术：" + fallbackScript;
+            }
+            return text;
+        } catch (Exception ex) {
+            log.warn("按用户方案改写建议失败: {}", ex.getMessage());
+            return fallback;
+        }
+    }
+
+    private String adviceSection(String advice, String label) {
+        String text = ClaimTexts.empty(advice);
+        String marker = label + "：";
+        int start = text.indexOf(marker);
+        if (start < 0) {
+            marker = label + ":";
+            start = text.indexOf(marker);
+        }
+        if (start < 0) {
+            return "";
+        }
+        int body = start + marker.length();
+        int next = text.length();
+        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("\\n\\s*\\d+\\.\\s*").matcher(text);
+        if (matcher.find(body)) {
+            next = matcher.start();
+        }
+        return text.substring(body, next).trim();
+    }
+
+    private String blankSection(String value, String fallback) {
+        return ClaimTexts.blank(value) ? fallback : value;
     }
 
     private void discard(Long caseId) {

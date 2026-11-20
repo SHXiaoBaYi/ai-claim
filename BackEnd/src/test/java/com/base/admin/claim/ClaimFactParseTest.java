@@ -30,6 +30,9 @@ class ClaimFactParseTest {
         assertTrue(ClaimTexts.isAdviceRevision("把具体方案改成只补发"));
         assertTrue(ClaimTexts.isAdviceRevision("重新再给一条建议"));
         assertTrue(ClaimTexts.isAdviceRevision("重新在给一条建议"));
+        assertTrue(ClaimTexts.isUserPlan("方案改成补发两斤"));
+        assertTrue(ClaimTexts.isUserPlan("就按退款200"));
+        assertFalse(ClaimTexts.isUserPlan("重新再给一条建议"));
         assertFalse(ClaimTexts.isBareAdviceRevision("重新再给一条建议"));
         assertTrue(ClaimTexts.isBareAdviceDissent("不满意"));
         assertTrue(ClaimTexts.isBareAdviceRevision("部分修改"));
